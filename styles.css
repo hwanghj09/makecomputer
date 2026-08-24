@@ -12,18 +12,19 @@ html, body {
   background: #14161b; padding: 8px 14px; border-bottom: 1px solid #333;
   flex: 0 0 auto;
 }
-#topbar h1 { font-size: 16px; margin: 0; color: #fff; font-weight: 600; }
-.topbar-actions { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+#topbar h1 { font-size: 16px; margin: 0; color: #fff; font-weight: 600; white-space: nowrap; }
+.topbar-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 13px; }
 .wire-color-picker { display: flex; align-items: center; gap: 4px; }
 .wire-style-label { color: #9fd3ff; font-size: 11px; }
 .wire-color-picker input[type=color] { width: 28px; height: 22px; border: none; background: none; cursor: pointer; }
 .btn {
   background: #2b2f38; color: #eee; border: 1px solid #444; border-radius: 4px;
-  padding: 5px 10px; font-size: 12px; cursor: pointer;
+  padding: 5px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
 }
 .btn:hover { background: #3a3f4b; }
 .btn.danger { border-color: #a33; color: #ff9d9d; }
 .btn.danger:hover { background: #4a1f1f; }
+.toolbar-sep { width: 1px; height: 20px; background: #3a3f4b; margin: 0 2px; }
 .run-toggle { display: flex; align-items: center; gap: 5px; }
 
 #main { flex: 1 1 auto; display: flex; min-height: 0; }
@@ -41,11 +42,10 @@ html, body {
 }
 #workspace.panning { cursor: grabbing; }
 #viewport { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
-#wireLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; pointer-events: none; z-index: 5; overflow: visible; }
+#wireLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; pointer-events: none; z-index: 15; overflow: visible; }
 #wireLayer path.wire { pointer-events: stroke; cursor: grab; }
 #wireLayer path.wire.selected { filter: drop-shadow(0 0 3px #fff); }
 #wireLayer path.wire.conflict { stroke: #ff2d2d !important; stroke-dasharray: 4 3; }
-#wireLayer circle.wire-bend-handle { fill: #fff; stroke: #000; stroke-width: 0.75; opacity: 0.85; }
 #componentsLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; z-index: 10; pointer-events: none; }
 
 #zoomControls {
@@ -108,7 +108,7 @@ html, body {
 .bb-row { display: flex; }
 .bb-gap { height: 10px; }
 .hole {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 10px; height: 10px; border-radius: 50%;
   background: #55524a; box-shadow: inset 0 1px 2px rgba(0,0,0,0.6);
   position: absolute;
 }

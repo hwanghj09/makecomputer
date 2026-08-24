@@ -42,6 +42,7 @@ const state = {
   pendingWire: null, // connector ref {kind:'hole'|'pin', ...}
   pendingEl: null,
   pendingCursor: null,
+  pendingPoints: [], // Tinkercad-style bend points clicked while routing a new wire
   running: true,
   lastTs: null,
   nodeLevels: new Map(), // nodeId -> LEVEL
@@ -1133,8 +1134,8 @@ function renderBoardDom(board) {
       hole.className = 'hole';
       hole.dataset.board = board.id; hole.dataset.row = row; hole.dataset.col = c;
       hole.style.position = 'absolute';
-      hole.style.left = (off.x - 4) + 'px';
-      hole.style.top = (off.y - 4) + 'px';
+      hole.style.left = (off.x - 5) + 'px';
+      hole.style.top = (off.y - 5) + 'px';
       el.appendChild(hole);
       board.holeEls.push({ el: hole, boardId: board.id, row, col: c });
     }
@@ -1157,6 +1158,9 @@ function renderBoardDom(board) {
   el.appendChild(delBtn);
   el.addEventListener('pointerdown', e => {
     if (e.target.closest('.hole')) return;
+    // While routing a wire, clicks on the board body drop a bend point (handled on
+    // pointerup) instead of dragging the whole board out from under the user.
+    if (state.pendingWire) return;
     startDragBoard(e, board);
   });
   document.getElementById('componentsLayer').appendChild(el);
@@ -1321,6 +1325,7 @@ function createComponentDom(comp, def) {
   } else {
     wrap.addEventListener('pointerdown', e => {
       if (e.target.closest('.pin,input,select,.dip-pole')) return;
+      if (state.pendingWire) return;
       startDragComponent(e, comp, def);
     });
   }
@@ -1426,21 +1431,23 @@ function sameConnector(a, b) {
 function clearPending() {
   if (state.pendingEl) state.pendingEl.classList.remove('pending');
   state.pendingWire = null; state.pendingEl = null; state.pendingCursor = null;
+  state.pendingPoints = [];
 }
-function finishWire(a, b) {
+function finishWire(a, b, points) {
   pushHistory();
-  state.wires.push({ id: uid('w'), a, b, color: state.activeWireColor, style: state.activeWireStyle, points: [] });
+  state.wires.push({ id: uid('w'), a, b, color: state.activeWireColor, style: state.activeWireStyle, points: (points || []).map(p => ({ ...p })) });
 }
 function handleConnectorDown(el, e) {
   const ref = connectorRefFromEl(el);
   if (state.pendingWire) {
-    if (!sameConnector(ref, state.pendingWire)) finishWire(state.pendingWire, ref);
+    if (!sameConnector(ref, state.pendingWire)) finishWire(state.pendingWire, ref, state.pendingPoints);
     clearPending();
     return;
   }
   state.pendingWire = ref;
   state.pendingEl = el;
   el.classList.add('pending');
+  state.pendingPoints = [];
   state.pendingCursor = workspacePointFromClient(e.clientX, e.clientY);
 }
 /* ---------------- Undo/redo history + clipboard ---------------- */
@@ -1533,13 +1540,16 @@ function rotateComponent(comp) {
 function smoothPath(pts) {
   if (pts.length < 2) return '';
   if (pts.length === 2) return `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y}`;
+  // Catmull-Rom -> cubic Bezier: unlike a quadratic curve that only leans toward each bend
+  // point, this passes exactly through every one of them, with smooth (non-looping) tangents.
+  const p = [pts[0], ...pts, pts[pts.length - 1]];
   let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 1; i < pts.length - 2; i++) {
-    const mid = { x: (pts[i].x + pts[i + 1].x) / 2, y: (pts[i].y + pts[i + 1].y) / 2 };
-    d += ` Q ${pts[i].x} ${pts[i].y} ${mid.x} ${mid.y}`;
+  for (let i = 1; i < p.length - 2; i++) {
+    const p0 = p[i - 1], p1 = p[i], p2 = p[i + 1], p3 = p[i + 2];
+    const c1x = p1.x + (p2.x - p0.x) / 6, c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6, c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2.x} ${p2.y}`;
   }
-  const n = pts.length;
-  d += ` Q ${pts[n - 2].x} ${pts[n - 2].y} ${pts[n - 1].x} ${pts[n - 1].y}`;
   return d;
 }
 function distToSegment(p, v, w) {
@@ -1619,8 +1629,16 @@ function setupWiringHandlers() {
     const target = hit && hit.closest('.hole,.pin');
     if (target) {
       const ref = connectorRefFromEl(target);
-      if (!sameConnector(ref, state.pendingWire)) finishWire(state.pendingWire, ref);
+      // Released back on the very connector we just started from (a plain, non-dragged
+      // click) - stay pending and wait for the real second click instead of self-cancelling.
+      if (sameConnector(ref, state.pendingWire)) return;
+      finishWire(state.pendingWire, ref, state.pendingPoints);
       clearPending();
+    } else if (hit && hit.closest('#workspace')) {
+      // Tinkercad-style routing: releasing on empty canvas mid-connection drops a bend
+      // point and keeps the wire pending, instead of doing nothing. (Releasing over UI
+      // chrome like the sidebar/toolbar is ignored, same as before.)
+      state.pendingPoints.push(workspacePointFromClient(e.clientX, e.clientY));
     }
   });
   const wireLayer = document.getElementById('wireLayer');
@@ -1767,22 +1785,14 @@ function updateWires() {
     path.setAttribute('fill', 'none');
     path.dataset.wireId = w.id;
     svg.appendChild(path);
-    if (w.points) {
-      for (const p of w.points) {
-        const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-        handle.setAttribute('cx', p.x); handle.setAttribute('cy', p.y); handle.setAttribute('r', 3.5);
-        handle.setAttribute('class', 'wire-bend-handle');
-        handle.style.pointerEvents = 'none';
-        svg.appendChild(handle);
-      }
-    }
   }
   if (state.pendingWire) {
     const a = connectorWorldPos(state.pendingWire);
     const c = state.pendingCursor;
     if (a && c) {
+      const pts = [a, ...state.pendingPoints, c];
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', `M ${a.x} ${a.y} L ${c.x} ${c.y}`);
+      path.setAttribute('d', pts.length > 2 ? smoothPath(pts) : `M ${a.x} ${a.y} L ${c.x} ${c.y}`);
       path.setAttribute('stroke', state.activeWireColor);
       path.setAttribute('stroke-width', '2');
       path.setAttribute('stroke-dasharray', '4 3');
@@ -1845,6 +1855,51 @@ function renderSidebar(filter) {
 }
 
 /* ---------------- Toolbar / drag-drop wiring / bootstrap ---------------- */
+/* ---------------- Save / load (file download, and browser-local storage) ---------------- */
+const LOCAL_SAVE_KEY = 'breadboard_sim_save_v1';
+function loadSnapshotObject(obj) {
+  if (!obj || !Array.isArray(obj.boards) || !Array.isArray(obj.components) || !Array.isArray(obj.wires)) {
+    alert('저장 데이터 형식이 올바르지 않습니다.');
+    return;
+  }
+  pushHistory();
+  restoreState(obj);
+}
+function saveToFile() {
+  const blob = new Blob([JSON.stringify(serializeState(), null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `breadboard-circuit-${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+function loadFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { loadSnapshotObject(JSON.parse(reader.result)); }
+    catch (err) { alert('파일을 읽는 중 오류가 발생했습니다: ' + err.message); }
+  };
+  reader.onerror = () => alert('파일을 읽을 수 없습니다.');
+  reader.readAsText(file);
+}
+function saveToLocal() {
+  try {
+    localStorage.setItem(LOCAL_SAVE_KEY, JSON.stringify(serializeState()));
+    alert('로컬(이 브라우저)에 저장했습니다.');
+  } catch (err) {
+    alert('로컬 저장에 실패했습니다: ' + err.message);
+  }
+}
+function loadFromLocal() {
+  const raw = localStorage.getItem(LOCAL_SAVE_KEY);
+  if (!raw) { alert('로컬에 저장된 회로가 없습니다.'); return; }
+  try { loadSnapshotObject(JSON.parse(raw)); }
+  catch (err) { alert('로컬 데이터를 불러오는 중 오류가 발생했습니다: ' + err.message); }
+}
+
 function setupToolbar() {
   const chkRunning = document.getElementById('chkRunning');
   chkRunning.addEventListener('change', () => { state.running = chkRunning.checked; });
@@ -1865,6 +1920,16 @@ function setupToolbar() {
     state.boards = []; state.components = []; state.wires = [];
     state.holeEls = []; state.pinEls = []; state.selection = null;
     clearPending();
+  });
+  document.getElementById('btnSaveFile').addEventListener('click', saveToFile);
+  document.getElementById('btnSaveLocal').addEventListener('click', saveToLocal);
+  document.getElementById('btnLoadLocal').addEventListener('click', loadFromLocal);
+  const loadFileInput = document.getElementById('loadFileInput');
+  document.getElementById('btnLoadFile').addEventListener('click', () => loadFileInput.click());
+  loadFileInput.addEventListener('change', () => {
+    const file = loadFileInput.files[0];
+    if (file) loadFromFile(file);
+    loadFileInput.value = '';
   });
   document.getElementById('partSearch').addEventListener('input', e => renderSidebar(e.target.value.trim()));
 }
@@ -1927,7 +1992,12 @@ function startPan(e) {
 function setupPanZoom() {
   const workspace = document.getElementById('workspace');
   // pointerdown reaches here only when nothing else (pin/hole/component/board) stopped it -> empty canvas
-  workspace.addEventListener('pointerdown', e => { startPan(e); });
+  workspace.addEventListener('pointerdown', e => {
+    // While routing a wire, an empty-canvas click drops a bend point (handled on
+    // pointerup) - panning the view out from under that click would be surprising.
+    if (state.pendingWire) return;
+    startPan(e);
+  });
   workspace.addEventListener('wheel', e => {
     e.preventDefault();
     if (e.ctrlKey || e.metaKey) {
