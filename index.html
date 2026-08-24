@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>인터랙티브 브레드보드 회로 시뮬레이터</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <h1>브레드보드 회로 시뮬레이터</h1>
+    <div class="topbar-actions">
+      <label class="wire-color-picker" title="다음에 연결할 점퍼선 색상">
+        선색
+        <input type="color" id="wireColorInput" value="#e63946">
+      </label>
+      <span id="wireStyleLabel" class="wire-style-label" title="사이드바에서 연결선/점퍼선 종류를 클릭해 바꿀 수 있습니다">스타일: 브레드보드 연결선</span>
+      <button type="button" id="btnDeleteSelected" class="btn">선택 삭제 (Del)</button>
+      <button type="button" id="btnClearWires" class="btn">배선 전체 삭제</button>
+      <button type="button" id="btnClearAll" class="btn danger">전체 초기화</button>
+      <label class="run-toggle">
+        <input type="checkbox" id="chkRunning" checked>
+        시뮬레이션 실행 중
+      </label>
+    </div>
+  </header>
+
+  <div id="main">
+    <section id="workspaceWrap">
+      <div id="workspace">
+        <div id="viewport">
+          <svg id="wireLayer"></svg>
+          <div id="componentsLayer"></div>
+        </div>
+        <div id="zoomControls">
+          <button type="button" id="btnZoomOut" title="축소">−</button>
+          <span id="zoomLabel">100%</span>
+          <button type="button" id="btnZoomIn" title="확대">+</button>
+          <button type="button" id="btnZoomReset" title="보기 초기화">⟲</button>
+        </div>
+      </div>
+      <div id="hintBar">부품을 오른쪽 목록에서 작업 공간으로 드래그해 배치하세요. 브레드보드/부품은 클릭 드래그로 이동, 빈 공간을 드래그하거나 마우스 휠로 화면을 이동, Ctrl+휠 또는 우측 하단 버튼으로 확대/축소합니다. 핀·구멍을 클릭한 뒤 다른 핀/구멍을 클릭하면 점퍼선이 연결됩니다. (Esc로 배선 취소, 클릭 후 Delete로 삭제)</div>
+    </section>
+
+    <aside id="sidebar">
+      <div class="sidebar-search">
+        <input type="text" id="partSearch" placeholder="부품/IC 품번 검색 (예: 74HC161, LED, 저항)">
+      </div>
+      <div id="partCategories"></div>
+    </aside>
+  </div>
+</div>
+
+<div id="tooltip" class="tooltip hidden"></div>
+
+<script src="script.js"></script>
+</body>
+</html>
