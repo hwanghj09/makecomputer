@@ -42,10 +42,11 @@ html, body {
 #workspace.panning { cursor: grabbing; }
 #viewport { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
 #wireLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; pointer-events: none; z-index: 5; overflow: visible; }
-#wireLayer path.wire { pointer-events: stroke; cursor: pointer; }
+#wireLayer path.wire { pointer-events: stroke; cursor: grab; }
 #wireLayer path.wire.selected { filter: drop-shadow(0 0 3px #fff); }
 #wireLayer path.wire.conflict { stroke: #ff2d2d !important; stroke-dasharray: 4 3; }
-#componentsLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; z-index: 10; }
+#wireLayer circle.wire-bend-handle { fill: #fff; stroke: #000; stroke-width: 0.75; opacity: 0.85; }
+#componentsLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; z-index: 10; pointer-events: none; }
 
 #zoomControls {
   position: absolute; right: 14px; bottom: 14px; z-index: 50;
@@ -122,6 +123,7 @@ html, body {
 .bb-label-col { width: 16px; font-size: 8px; color: #766f5c; display:flex; align-items:center; justify-content:center; }
 
 /* ---------- generic component body ---------- */
+.comp { pointer-events: auto; }
 .part-body {
   position: absolute; border-radius: 3px; cursor: move; -webkit-user-select: none; user-select: none;
 }

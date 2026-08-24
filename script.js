@@ -51,6 +51,9 @@ const state = {
   activeWireColor: '#e63946',
   activeWireStyle: 'short',
   view: { zoom: 1, panX: 0, panY: 0 }, // pan/zoom camera for the workspace
+  history: { past: [], future: [] }, // Ctrl+Z / Ctrl+Y undo-redo (whole-state snapshots)
+  clipboard: null, pasteCount: 0,     // Ctrl+C / Ctrl+V
+  activeDrag: null,                   // {cancel()} for the in-progress board/component drag, if any - Escape reverts it
 };
 
 /* ---------------- Breadboard model ---------------- */
@@ -968,7 +971,7 @@ PARTS['board_long'] = { name: '긴 브레드보드', category: 'board', isBoard:
  * ========================================================================= */
 const ALL_ROWS = ['RTP', 'RTM', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'RBP', 'RBM'];
 
-function getPinOffsets(def) {
+function getBaseOffsets(def) {
   if (def.__offs) return def.__offs;
   const n = def.pins.length;
   const offs = {};
@@ -989,34 +992,102 @@ function getPinOffsets(def) {
   return offs;
 }
 
+// Rotate a base offset map by a multiple of 90deg (clockwise) around the anchor pin (dx=dy=0).
+// Safe for simple parts (their leads are flexible in reality, so any two independently-valid
+// holes are fine at any angle) but NOT for a straddle part's 180deg case - see below.
+function rotateOffsets(offs, rotDeg) {
+  const turns = (((Math.round((rotDeg || 0) / 90)) % 4) + 4) % 4;
+  if (turns === 0) return offs;
+  const out = {};
+  for (const k of Object.keys(offs)) {
+    let { dx, dy } = offs[k];
+    for (let t = 0; t < turns; t++) { const ndx = -dy, ndy = dx; dx = ndx; dy = ndy; }
+    out[k] = { dx, dy };
+  }
+  return out;
+}
+
+// A DIP/square2x2 part physically straddles the board's one fixed trench, which is NOT
+// symmetric (there's no matching gap on the other side of row E) - so naively rotating its
+// coordinates 180deg would walk pins two rows the WRONG way and land them in-cluster, on the
+// same column tie as a pin from the other row (an electrical short). A real 180deg flip keeps
+// the part seated across the SAME trench; only which pins sit in row E vs row F, and their
+// left-right order, changes. Compute that swap explicitly instead of rotating coordinates.
+function getStraddleFlipOffsets(def) {
+  if (def.__flipOffs) return def.__flipOffs;
+  const n = def.pins.length;
+  const half = def.kind === 'dip' ? n / 2 : 2;
+  const mirror = def.kind === 'dip';
+  const offs = {};
+  for (let i = 1; i <= half; i++) {
+    offs[i] = { dx: (half - i) * HOLE, dy: 2 * HOLE };
+  }
+  for (let i = half + 1; i <= n; i++) {
+    const localIdx = i - half - 1;
+    const dxIdx = mirror ? (half - 1 - localIdx) : localIdx;
+    offs[i] = { dx: (half - 1 - dxIdx) * HOLE, dy: 0 };
+  }
+  def.__flipOffs = offs;
+  return offs;
+}
+
+// Per-component pin offsets (base layout is cached on the def; rotation is applied per call
+// since it's per-instance state, not per-part-type).
+function getPinOffsets(def, rotDeg) {
+  const base = getBaseOffsets(def);
+  const turns = (((Math.round((rotDeg || 0) / 90)) % 4) + 4) % 4;
+  if (turns === 0) return base;
+  const isStraddle = def.kind === 'dip' || (def.layout && def.layout.type === 'square2x2');
+  if (isStraddle && turns === 2) return getStraddleFlipOffsets(def);
+  return rotateOffsets(base, rotDeg);
+}
+
 function boardHoleAbs(board, row, col) {
   const off = holePixelOffset(row, col);
   return { x: board.x + off.x, y: board.y + off.y };
 }
 
-function findSnapStraddle(half, x, y) {
-  let best = null;
-  for (const board of state.boards) {
-    const col = Math.round((x - board.x - 10) / HOLE) + 1;
-    if (col < 1 || col + half - 1 > board.cols) continue;
-    const trenchY = (boardHoleAbs(board, 'E', col).y + boardHoleAbs(board, 'F', col).y) / 2;
-    const dist = Math.abs(y - trenchY);
-    if (dist < 2.2 * HOLE && (!best || dist < best.dist)) best = { board, col, dist };
-  }
-  return best;
-}
+// y-position (in HOLE-grid units, unscaled) of each named row - used to test whether a
+// rotated pin offset lands on a real row (rows are mostly 1*HOLE apart, except the two
+// rail gaps and the center trench between E/F, which are 2*HOLE).
+const ROW_Y_UNITS = {};
+ALL_ROWS.forEach(r => { ROW_Y_UNITS[r] = holePixelOffset(r, 1).y; });
+const Y_UNIT_TO_ROW = {};
+ALL_ROWS.forEach(r => { Y_UNIT_TO_ROW[ROW_Y_UNITS[r]] = r; });
 
-function findSnapRow(pinCount, spacing, x, y) {
+// Generic hole-snap solver: works for any pin-offset layout (row, square2x2, dip; any
+// 90deg rotation) by checking whether, for some candidate anchor row/column on some board,
+// every pin's rotated offset lands exactly on a real hole. A DIP part can only physically
+// sit straddling a board's center trench, so any drop reasonably near a board snaps there
+// (column clamped to a valid range) instead of requiring the cursor on the trench line;
+// rotated orientations that don't line up with any real row span (e.g. a 14-pin DIP turned
+// 90deg) simply find no valid placement and stay unsnapped/free-floating.
+function findGenericSnap(offsets, x, y) {
+  const margin = HOLE * 2;
   let best = null;
   for (const board of state.boards) {
+    const width = board.cols * HOLE + 20;
+    const height = BB_HEIGHT_UNITS * HOLE + 28;
+    if (x < board.x - margin || x > board.x + width + margin) continue;
+    if (y < board.y - margin || y > board.y + height + margin) continue;
+    const anchorCol = Math.round((x - board.x - 10) / HOLE) + 1;
+    const anchorX = board.x + (anchorCol - 1) * HOLE + 10;
     for (const row of ALL_ROWS) {
-      const rowY = boardHoleAbs(board, row, 1).y;
-      const dist = Math.abs(y - rowY);
-      if (dist >= HOLE * 0.9) continue;
-      const col = Math.round((x - board.x - 10) / HOLE) + 1;
-      const lastCol = col + (pinCount - 1) * spacing;
-      if (col < 1 || lastCol > board.cols) continue;
-      if (!best || dist < best.dist) best = { board, row, col, dist };
+      const anchorY = board.y + ROW_Y_UNITS[row];
+      const dist = Math.hypot(x - anchorX, y - anchorY);
+      if (best && dist >= best.dist) continue;
+      const plug = {};
+      let ok = true;
+      for (const pinNum of Object.keys(offsets)) {
+        const off = offsets[pinNum];
+        const targetRow = Y_UNIT_TO_ROW[ROW_Y_UNITS[row] + off.dy];
+        if (targetRow === undefined) { ok = false; break; }
+        const targetCol = anchorCol + off.dx / HOLE;
+        if (targetCol < 1 || targetCol > board.cols) { ok = false; break; }
+        plug[pinNum] = { boardId: board.id, row: targetRow, col: targetCol };
+      }
+      if (!ok) continue;
+      best = { board, col: anchorCol, row, dist, plug };
     }
   }
   return best;
@@ -1026,33 +1097,14 @@ function clearPinPlugs(comp) { comp.pinPlug = {}; }
 
 function applySnap(comp, def, x, y) {
   clearPinPlugs(comp);
-  const n = def.pins.length;
-  if (def.isBoard) return;
-  const straddle = def.kind === 'dip' || (def.layout && def.layout.type === 'square2x2');
-  if (straddle) {
-    const half = def.kind === 'dip' ? n / 2 : 2;
-    const mirror = def.kind === 'dip';
-    const snap = findSnapStraddle(half, x, y);
-    if (snap) {
-      const p1 = boardHoleAbs(snap.board, 'E', snap.col);
-      comp.x = p1.x; comp.y = p1.y;
-      for (let i = 1; i <= half; i++) comp.pinPlug[i] = { boardId: snap.board.id, row: 'E', col: snap.col + (i - 1) };
-      for (let i = half + 1; i <= n; i++) {
-        const localIdx = i - half - 1;
-        const c2 = mirror ? snap.col + (half - 1 - localIdx) : snap.col + localIdx;
-        comp.pinPlug[i] = { boardId: snap.board.id, row: 'F', col: c2 };
-      }
-      return true;
-    }
-  } else if (def.layout && def.layout.type === 'row') {
-    const spacing = def.layout.spacing || 1;
-    const snap = findSnapRow(n, spacing, x, y);
-    if (snap) {
-      const p1 = boardHoleAbs(snap.board, snap.row, snap.col);
-      comp.x = p1.x; comp.y = p1.y;
-      def.pins.forEach((p, idx) => { comp.pinPlug[p.n] = { boardId: snap.board.id, row: snap.row, col: snap.col + idx * spacing }; });
-      return true;
-    }
+  if (def.isBoard) return false;
+  const offsets = getPinOffsets(def, comp.rot || 0);
+  const snap = findGenericSnap(offsets, x, y);
+  if (snap) {
+    comp.x = snap.board.x + (snap.col - 1) * HOLE + 10;
+    comp.y = snap.board.y + ROW_Y_UNITS[snap.row];
+    comp.pinPlug = snap.plug;
+    return true;
   }
   comp.x = x; comp.y = y;
   return false;
@@ -1101,7 +1153,7 @@ function renderBoardDom(board) {
   delBtn.title = '브레드보드 삭제';
   delBtn.style.cssText = 'position:absolute;top:2px;right:4px;cursor:pointer;color:#933;font-size:12px;font-weight:bold;z-index:30;';
   delBtn.addEventListener('pointerdown', e => { e.stopPropagation(); });
-  delBtn.addEventListener('click', e => { e.stopPropagation(); deleteBoard(board); });
+  delBtn.addEventListener('click', e => { e.stopPropagation(); pushHistory(); deleteBoard(board); });
   el.appendChild(delBtn);
   el.addEventListener('pointerdown', e => {
     if (e.target.closest('.hole')) return;
@@ -1119,10 +1171,29 @@ function startDragBoard(e, board) {
   const attached = state.components.filter(c => Object.values(c.pinPlug).some(p => p.boardId === board.id));
   const origins = attached.map(c => ({ comp: c, x: c.x, y: c.y }));
   let dragging = false;
+  let historyPushed = false;
+  function cancel() {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    board.x = origX; board.y = origY;
+    board.el.style.left = board.x + 'px';
+    board.el.style.top = board.y + 'px';
+    for (const o of origins) {
+      o.comp.x = o.x; o.comp.y = o.y;
+      o.comp.el.style.left = o.comp.x + 'px';
+      o.comp.el.style.top = o.comp.y + 'px';
+    }
+    if (historyPushed) state.history.past.pop();
+    state.activeDrag = null;
+  }
   function move(ev) {
     const dx = (ev.clientX - startX) / state.view.zoom;
     const dy = (ev.clientY - startY) / state.view.zoom;
-    if (!dragging && Math.hypot(dx, dy) > 3) dragging = true;
+    if (!dragging && Math.hypot(dx, dy) > 3) {
+      dragging = true;
+      pushHistory(); historyPushed = true;
+      state.activeDrag = { cancel };
+    }
     if (!dragging) return;
     board.x = origX + dx; board.y = origY + dy;
     board.el.style.left = board.x + 'px';
@@ -1136,6 +1207,7 @@ function startDragBoard(e, board) {
   function up() {
     document.removeEventListener('pointermove', move);
     document.removeEventListener('pointerup', up);
+    state.activeDrag = null;
     if (!dragging) selectBoard(board);
   }
   document.addEventListener('pointermove', move);
@@ -1157,12 +1229,39 @@ function deleteBoard(board) {
 }
 
 function renderComponentInner(comp, def) {
-  const offs = getPinOffsets(def);
+  const rot = comp.rot || 0;
+  const turns = (((Math.round(rot / 90)) % 4) + 4) % 4;
+  const offs = getPinOffsets(def, rot);
+  const isStraddle = def.kind === 'dip' || (def.layout && def.layout.type === 'square2x2');
   const bodyHtml = def.render ? def.render(comp) : '';
   const isDip = def.kind === 'dip';
-  const bodyLeft = isDip ? -6 : -6;
+  const bodyLeft = -6;
   const bodyTop = isDip ? -14 : -6;
-  comp.el.innerHTML = `<div class="body-wrap" style="position:absolute;left:${bodyLeft}px;top:${bodyTop}px">${bodyHtml}</div>`;
+  // The body graphic rotates as a rigid CSS transform. At 90/270deg it pivots on the anchor
+  // pin (dx=dy=0), matching the coordinate-rotated pin offsets. At 180deg a straddle part
+  // uses the explicit row/column swap (getStraddleFlipOffsets) instead of coordinate math
+  // (see its comment), so the body must pivot on the pin cluster's own center to stay lined
+  // up with it, not on the anchor pin (which itself moved to a corner under the swap).
+  let originX = -bodyLeft, originY = -bodyTop;
+  if (isStraddle && turns === 2) {
+    const half = def.kind === 'dip' ? def.pins.length / 2 : 2;
+    originX = -bodyLeft + (half - 1) * HOLE / 2;
+    originY = -bodyTop + HOLE;
+  }
+  const bodyTransform = rot ? ` transform:rotate(${rot}deg);transform-origin:${originX}px ${originY}px;` : '';
+  comp.el.innerHTML = `<div class="body-wrap" style="position:absolute;left:${bodyLeft}px;top:${bodyTop}px;${bodyTransform}">${bodyHtml}</div>`;
+  // For a straddle-kind part, pin-number labels need to be nudged OUTWARD off the body, away
+  // from the centered part-name text. Which screen axis is "outward" depends on rotation: at
+  // 0/180deg the two pin-rows differ in dy (the short axis) with dx spanning the long row, so
+  // labels nudge along dy. At 90/270deg coordinate-rotation swaps that - the two rows now
+  // differ in dx while dy spans the long row - so labels must nudge along dx instead, or they
+  // land deep inside the (also-rotated) body next to the name text instead of beside the pins.
+  let thinAxis = null, thinMin = 0, thinMax = 0;
+  if (isStraddle) {
+    thinAxis = (turns === 1 || turns === 3) ? 'dx' : 'dy';
+    const vals = def.pins.map(p => offs[p.n][thinAxis]);
+    thinMin = Math.min(...vals); thinMax = Math.max(...vals);
+  }
   for (const p of def.pins) {
     const off = offs[p.n];
     const pinEl = document.createElement('div');
@@ -1175,8 +1274,19 @@ function renderComponentInner(comp, def) {
     state.pinEls.push({ el: pinEl, compId: comp.id, pinNum: p.n });
     const lbl = document.createElement('div');
     lbl.className = 'pin-label';
-    lbl.style.left = (off.dx - 3) + 'px';
-    lbl.style.top = (off.dy + 11) + 'px';
+    if (isStraddle && thinMax > thinMin) {
+      const isNearSide = off[thinAxis] === thinMin;
+      if (thinAxis === 'dy') {
+        lbl.style.left = (off.dx - 3) + 'px';
+        lbl.style.top = (isNearSide ? off.dy - 12 : off.dy + 11) + 'px';
+      } else {
+        lbl.style.left = (isNearSide ? off.dx - 14 : off.dx + 8) + 'px';
+        lbl.style.top = (off.dy - 3) + 'px';
+      }
+    } else {
+      lbl.style.left = (off.dx - 3) + 'px';
+      lbl.style.top = (off.dy + 11) + 'px';
+    }
     lbl.textContent = p.n;
     comp.el.appendChild(lbl);
   }
@@ -1220,10 +1330,25 @@ function startDragComponent(e, comp, def) {
   e.stopPropagation();
   const startX = e.clientX, startY = e.clientY;
   const origX = comp.x, origY = comp.y;
+  const origPinPlug = { ...comp.pinPlug };
   let dragging = false;
+  let historyPushed = false;
+  function cancel() {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    comp.x = origX; comp.y = origY; comp.pinPlug = origPinPlug;
+    comp.el.style.left = comp.x + 'px';
+    comp.el.style.top = comp.y + 'px';
+    if (historyPushed) state.history.past.pop();
+    state.activeDrag = null;
+  }
   function move(ev) {
     const dx = (ev.clientX - startX) / state.view.zoom, dy = (ev.clientY - startY) / state.view.zoom;
-    if (!dragging && Math.hypot(dx, dy) > 4) dragging = true;
+    if (!dragging && Math.hypot(dx, dy) > 4) {
+      dragging = true;
+      pushHistory(); historyPushed = true;
+      state.activeDrag = { cancel };
+    }
     if (dragging) {
       comp.x = origX + dx; comp.y = origY + dy;
       comp.el.style.left = comp.x + 'px';
@@ -1237,6 +1362,7 @@ function startDragComponent(e, comp, def) {
       applySnap(comp, def, comp.x, comp.y);
       comp.el.style.left = comp.x + 'px';
       comp.el.style.top = comp.y + 'px';
+      state.activeDrag = null;
     } else {
       selectComponent(comp);
       if (def.onClick) { def.onClick(comp); }
@@ -1255,15 +1381,17 @@ function placeComponent(partId, dropX, dropY) {
     if (lbl) lbl.textContent = `스타일: ${def.name}`;
     return null;
   }
+  pushHistory();
   if (def.isBoard) {
     const board = createBoard(dropX, dropY);
     renderBoardDom(board);
     return board;
   }
-  const comp = { id: uid('c'), type: partId, x: dropX, y: dropY, pinPlug: {}, state: def.init ? def.init() : {} };
+  const comp = { id: uid('c'), type: partId, x: dropX, y: dropY, rot: 0, pinPlug: {}, state: def.init ? def.init() : {} };
   applySnap(comp, def, dropX, dropY);
   state.components.push(comp);
   createComponentDom(comp, def);
+  selectComponent(comp);
   return comp;
 }
 
@@ -1272,7 +1400,7 @@ function pinWorldPos(compId, pinNum) {
   const comp = getComponent(compId);
   if (!comp) return null;
   const def = PARTS[comp.type];
-  const off = getPinOffsets(def)[pinNum];
+  const off = getPinOffsets(def, comp.rot || 0)[pinNum];
   if (!off) return null;
   return { x: comp.x + off.dx, y: comp.y + off.dy };
 }
@@ -1300,7 +1428,8 @@ function clearPending() {
   state.pendingWire = null; state.pendingEl = null; state.pendingCursor = null;
 }
 function finishWire(a, b) {
-  state.wires.push({ id: uid('w'), a, b, color: state.activeWireColor, style: state.activeWireStyle });
+  pushHistory();
+  state.wires.push({ id: uid('w'), a, b, color: state.activeWireColor, style: state.activeWireStyle, points: [] });
 }
 function handleConnectorDown(el, e) {
   const ref = connectorRefFromEl(el);
@@ -1314,6 +1443,164 @@ function handleConnectorDown(el, e) {
   el.classList.add('pending');
   state.pendingCursor = workspacePointFromClient(e.clientX, e.clientY);
 }
+/* ---------------- Undo/redo history + clipboard ---------------- */
+function serializeState() {
+  return JSON.parse(JSON.stringify({
+    boards: state.boards.map(b => ({ id: b.id, x: b.x, y: b.y, cols: b.cols })),
+    components: state.components.map(c => ({ id: c.id, type: c.type, x: c.x, y: c.y, rot: c.rot || 0, pinPlug: c.pinPlug, state: c.state })),
+    wires: state.wires.map(w => ({ id: w.id, a: w.a, b: w.b, color: w.color, style: w.style, points: w.points || [] })),
+  }));
+}
+function restoreState(snap) {
+  document.getElementById('componentsLayer').innerHTML = '';
+  state.boards = []; state.components = []; state.wires = [];
+  state.holeEls = []; state.pinEls = []; state.selection = null;
+  clearPending();
+  for (const bd of snap.boards) {
+    const board = { id: bd.id, x: bd.x, y: bd.y, cols: bd.cols };
+    state.boards.push(board);
+    renderBoardDom(board);
+  }
+  for (const cd of snap.components) {
+    const def = PARTS[cd.type];
+    if (!def) continue;
+    const comp = { id: cd.id, type: cd.type, x: cd.x, y: cd.y, rot: cd.rot || 0, pinPlug: cd.pinPlug || {}, state: cd.state };
+    state.components.push(comp);
+    createComponentDom(comp, def);
+  }
+  state.wires = snap.wires.map(w => ({ ...w, points: (w.points || []).map(p => ({ ...p })) }));
+}
+function pushHistory() {
+  state.history.past.push(serializeState());
+  if (state.history.past.length > 60) state.history.past.shift();
+  state.history.future = [];
+}
+function undo() {
+  if (!state.history.past.length) return;
+  const cur = serializeState();
+  const prev = state.history.past.pop();
+  state.history.future.push(cur);
+  restoreState(prev);
+}
+function redo() {
+  if (!state.history.future.length) return;
+  const cur = serializeState();
+  const next = state.history.future.pop();
+  state.history.past.push(cur);
+  restoreState(next);
+}
+function copySelection() {
+  if (!state.selection || state.selection.kind !== 'comp') return;
+  const comp = getComponent(state.selection.id);
+  if (!comp) return;
+  state.clipboard = JSON.parse(JSON.stringify({ type: comp.type, rot: comp.rot || 0, x: comp.x, y: comp.y, state: comp.state }));
+  state.pasteCount = 0;
+}
+function pasteClipboard() {
+  if (!state.clipboard) return;
+  const def = PARTS[state.clipboard.type];
+  if (!def) return;
+  pushHistory();
+  state.pasteCount = (state.pasteCount || 0) + 1;
+  const offset = state.pasteCount * HOLE * 2;
+  const comp = {
+    id: uid('c'), type: state.clipboard.type,
+    x: state.clipboard.x + offset, y: state.clipboard.y + offset,
+    rot: state.clipboard.rot || 0,
+    pinPlug: {},
+    state: JSON.parse(JSON.stringify(state.clipboard.state)),
+  };
+  applySnap(comp, def, comp.x, comp.y);
+  state.components.push(comp);
+  createComponentDom(comp, def);
+  selectComponent(comp);
+}
+function rotateComponent(comp) {
+  const def = PARTS[comp.type];
+  if (!def || def.isBoard) return;
+  pushHistory();
+  comp.rot = ((comp.rot || 0) + 90) % 360;
+  applySnap(comp, def, comp.x, comp.y);
+  renderComponent(comp);
+  comp.el.style.left = comp.x + 'px';
+  comp.el.style.top = comp.y + 'px';
+}
+
+/* ---------------- Bendable jumper wires ---------------- */
+// Smooth path through arbitrary points (exact at the endpoints, curved near the rest) -
+// used once a wire has user-added bend points; the default (no bends) keeps the original
+// fixed droop curve so untouched wires look exactly as before.
+function smoothPath(pts) {
+  if (pts.length < 2) return '';
+  if (pts.length === 2) return `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y}`;
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 1; i < pts.length - 2; i++) {
+    const mid = { x: (pts[i].x + pts[i + 1].x) / 2, y: (pts[i].y + pts[i + 1].y) / 2 };
+    d += ` Q ${pts[i].x} ${pts[i].y} ${mid.x} ${mid.y}`;
+  }
+  const n = pts.length;
+  d += ` Q ${pts[n - 2].x} ${pts[n - 2].y} ${pts[n - 1].x} ${pts[n - 1].y}`;
+  return d;
+}
+function distToSegment(p, v, w) {
+  const l2 = (v.x - w.x) ** 2 + (v.y - w.y) ** 2;
+  if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y);
+  let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y)));
+}
+function nearestPointIndex(pts, x, y, threshold) {
+  let best = -1, bestDist = threshold;
+  pts.forEach((p, i) => { const d = Math.hypot(p.x - x, p.y - y); if (d < bestDist) { bestDist = d; best = i; } });
+  return best;
+}
+function insertIndexForClick(a, pts, b, x, y) {
+  const poly = [a, ...pts, b];
+  let bestSeg = 0, bestDist = Infinity;
+  for (let i = 0; i < poly.length - 1; i++) {
+    const d = distToSegment({ x, y }, poly[i], poly[i + 1]);
+    if (d < bestDist) { bestDist = d; bestSeg = i; }
+  }
+  return bestSeg;
+}
+function startWireBendDrag(e, wire) {
+  if (!wire.points) wire.points = [];
+  const startWorld = workspacePointFromClient(e.clientX, e.clientY);
+  const a = connectorWorldPos(wire.a), b = connectorWorldPos(wire.b);
+  if (!a || !b) return;
+  pushHistory();
+  let idx = nearestPointIndex(wire.points, startWorld.x, startWorld.y, 14);
+  const isNew = idx === -1;
+  if (isNew) {
+    idx = insertIndexForClick(a, wire.points, b, startWorld.x, startWorld.y);
+    wire.points.splice(idx, 0, { x: startWorld.x, y: startWorld.y });
+  }
+  let dragging = false;
+  function move(ev) {
+    const p = workspacePointFromClient(ev.clientX, ev.clientY);
+    if (Math.hypot(p.x - startWorld.x, p.y - startWorld.y) > 2) dragging = true;
+    wire.points[idx] = { x: p.x, y: p.y };
+  }
+  function up() {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    if (!dragging) {
+      // plain click, not a drag: discard the speculative bend point and the history entry
+      if (isNew) wire.points.splice(idx, 1);
+      state.history.past.pop();
+    }
+  }
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+}
+function removeNearestBendPoint(wire, x, y) {
+  const idx = nearestPointIndex(wire.points || [], x, y, 14);
+  if (idx === -1) return false;
+  pushHistory();
+  wire.points.splice(idx, 1);
+  return true;
+}
+
 function setupWiringHandlers() {
   const layer = document.getElementById('componentsLayer');
   layer.addEventListener('pointerdown', e => {
@@ -1336,15 +1623,49 @@ function setupWiringHandlers() {
       clearPending();
     }
   });
-  document.getElementById('wireLayer').addEventListener('click', e => {
+  const wireLayer = document.getElementById('wireLayer');
+  wireLayer.addEventListener('pointerdown', e => {
+    const path = e.target.closest('path.wire');
+    if (!path) return;
+    e.stopPropagation();
+    const wire = state.wires.find(w => w.id === path.dataset.wireId);
+    if (wire) startWireBendDrag(e, wire);
+  });
+  wireLayer.addEventListener('dblclick', e => {
+    const path = e.target.closest('path.wire');
+    if (!path) return;
+    const wire = state.wires.find(w => w.id === path.dataset.wireId);
+    if (!wire) return;
+    const pt = workspacePointFromClient(e.clientX, e.clientY);
+    removeNearestBendPoint(wire, pt.x, pt.y);
+  });
+  wireLayer.addEventListener('click', e => {
     const path = e.target.closest('path.wire');
     if (path) selectWire(path.dataset.wireId);
   });
+  // Right-click while a wire endpoint is pending (first click already made) cancels it,
+  // same as Escape - it should not also open the browser's context menu.
+  document.addEventListener('contextmenu', e => {
+    if (state.pendingWire) { e.preventDefault(); clearPending(); }
+  });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') clearPending();
-    if ((e.key === 'Delete' || e.key === 'Backspace') &&
-      !(e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT')) {
-      deleteSelection();
+    if (e.key === 'Escape') {
+      if (state.activeDrag) state.activeDrag.cancel();
+      clearPending();
+      return;
+    }
+    const typing = e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.isContentEditable;
+    if (typing) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') { deleteSelection(); return; }
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    if (mod && !e.shiftKey && key === 'z') { e.preventDefault(); undo(); return; }
+    if (mod && (key === 'y' || (e.shiftKey && key === 'z'))) { e.preventDefault(); redo(); return; }
+    if (mod && key === 'c') { e.preventDefault(); copySelection(); return; }
+    if (mod && key === 'v') { e.preventDefault(); pasteClipboard(); return; }
+    if (!mod && key === 'r' && state.selection && state.selection.kind === 'comp') {
+      const comp = getComponent(state.selection.id);
+      if (comp) rotateComponent(comp);
     }
   });
 }
@@ -1371,6 +1692,7 @@ function selectWire(wireId) {
 function refUsesComp(ref, compId) { return ref.kind === 'pin' && ref.compId === compId; }
 function deleteSelection() {
   if (!state.selection) return;
+  pushHistory();
   if (state.selection.kind === 'comp') {
     const comp = getComponent(state.selection.id);
     if (comp) {
@@ -1425,9 +1747,14 @@ function updateWires() {
   for (const w of state.wires) {
     const a = connectorWorldPos(w.a), b = connectorWorldPos(w.b);
     if (!a || !b) continue;
-    const droop = w.style === 'short' ? 8 : 30;
-    const midY = (a.y + b.y) / 2 + droop;
-    const d = `M ${a.x} ${a.y} C ${a.x} ${midY}, ${b.x} ${midY}, ${b.x} ${b.y}`;
+    let d;
+    if (w.points && w.points.length) {
+      d = smoothPath([a, ...w.points, b]);
+    } else {
+      const droop = w.style === 'short' ? 8 : 30;
+      const midY = (a.y + b.y) / 2 + droop;
+      d = `M ${a.x} ${a.y} C ${a.x} ${midY}, ${b.x} ${midY}, ${b.x} ${b.y}`;
+    }
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', d);
     let cls = 'wire';
@@ -1440,6 +1767,15 @@ function updateWires() {
     path.setAttribute('fill', 'none');
     path.dataset.wireId = w.id;
     svg.appendChild(path);
+    if (w.points) {
+      for (const p of w.points) {
+        const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        handle.setAttribute('cx', p.x); handle.setAttribute('cy', p.y); handle.setAttribute('r', 3.5);
+        handle.setAttribute('class', 'wire-bend-handle');
+        handle.style.pointerEvents = 'none';
+        svg.appendChild(handle);
+      }
+    }
   }
   if (state.pendingWire) {
     const a = connectorWorldPos(state.pendingWire);
@@ -1516,9 +1852,15 @@ function setupToolbar() {
   state.activeWireColor = wireColorInput.value;
   wireColorInput.addEventListener('input', () => { state.activeWireColor = wireColorInput.value; });
   document.getElementById('btnDeleteSelected').addEventListener('click', deleteSelection);
-  document.getElementById('btnClearWires').addEventListener('click', () => { state.wires = []; });
+  document.getElementById('btnClearWires').addEventListener('click', () => {
+    if (!state.wires.length) return;
+    pushHistory();
+    state.wires = [];
+  });
   document.getElementById('btnClearAll').addEventListener('click', () => {
+    if (!state.boards.length && !state.components.length && !state.wires.length) return;
     if (!confirm('작업 공간의 모든 부품과 배선을 삭제합니다. 계속할까요?')) return;
+    pushHistory();
     document.getElementById('componentsLayer').innerHTML = '';
     state.boards = []; state.components = []; state.wires = [];
     state.holeEls = []; state.pinEls = []; state.selection = null;
@@ -1537,6 +1879,76 @@ function setupDragDrop() {
     placeComponent(partId, pt.x, pt.y);
   });
 }
+/* ---------------- Pan / zoom camera ---------------- */
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function applyView() {
+  const vp = document.getElementById('viewport');
+  vp.style.transform = `translate(${state.view.panX}px, ${state.view.panY}px) scale(${state.view.zoom})`;
+}
+function updateZoomLabel() {
+  const lbl = document.getElementById('zoomLabel');
+  if (lbl) lbl.textContent = Math.round(state.view.zoom * 100) + '%';
+}
+function zoomAt(clientX, clientY, factor) {
+  const rect = document.getElementById('workspace').getBoundingClientRect();
+  const mx = clientX - rect.left, my = clientY - rect.top;
+  const oldZoom = state.view.zoom;
+  const newZoom = clamp(oldZoom * factor, 0.25, 3);
+  const worldX = (mx - state.view.panX) / oldZoom;
+  const worldY = (my - state.view.panY) / oldZoom;
+  state.view.panX = mx - worldX * newZoom;
+  state.view.panY = my - worldY * newZoom;
+  state.view.zoom = newZoom;
+  applyView();
+  updateZoomLabel();
+}
+function zoomByButton(factor) {
+  const rect = document.getElementById('workspace').getBoundingClientRect();
+  zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
+}
+function startPan(e) {
+  const workspace = document.getElementById('workspace');
+  workspace.classList.add('panning');
+  const startX = e.clientX, startY = e.clientY;
+  const origPanX = state.view.panX, origPanY = state.view.panY;
+  function move(ev) {
+    state.view.panX = origPanX + (ev.clientX - startX);
+    state.view.panY = origPanY + (ev.clientY - startY);
+    applyView();
+  }
+  function up() {
+    workspace.classList.remove('panning');
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+  }
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+}
+function setupPanZoom() {
+  const workspace = document.getElementById('workspace');
+  // pointerdown reaches here only when nothing else (pin/hole/component/board) stopped it -> empty canvas
+  workspace.addEventListener('pointerdown', e => { startPan(e); });
+  workspace.addEventListener('wheel', e => {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) {
+      zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+    } else {
+      state.view.panX -= e.deltaX;
+      state.view.panY -= e.deltaY;
+      applyView();
+    }
+  }, { passive: false });
+  document.getElementById('btnZoomIn').addEventListener('click', () => zoomByButton(1.2));
+  document.getElementById('btnZoomOut').addEventListener('click', () => zoomByButton(1 / 1.2));
+  document.getElementById('btnZoomReset').addEventListener('click', () => {
+    state.view = { zoom: 1, panX: 0, panY: 0 };
+    applyView();
+    updateZoomLabel();
+  });
+  applyView();
+  updateZoomLabel();
+}
+
 function frameLoop(ts) {
   if (state.lastTs == null) state.lastTs = ts;
   const dt = Math.min(ts - state.lastTs, 100);
@@ -1551,6 +1963,7 @@ function init() {
   setupWiringHandlers();
   setupToolbar();
   setupDragDrop();
+  setupPanZoom();
   requestAnimationFrame(frameLoop);
 }
 document.addEventListener('DOMContentLoaded', init);
