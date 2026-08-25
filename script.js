@@ -527,9 +527,14 @@ PARTS['wire_dupont'] = {
 
 function dipFootprint(pinCount) { return { w: pinCount / 2, h: 3 }; }
 
+// Margin kept above the top pin row and below the bottom pin row so pin-number labels
+// (rendered inside renderComponentInner) always fit inside the body, instead of spilling
+// out onto the breadboard behind the part.
+const DIP_MARGIN = 14;
+
 function renderDipBody(comp, def, label) {
   const n = def.pins.length;
-  const w = (n / 2) * HOLE, h = 3 * HOLE;
+  const w = (n / 2) * HOLE, h = 2 * HOLE + 2 * DIP_MARGIN;
   return `<div class="ic-body" style="width:${w}px;height:${h}px;position:relative">
     <div class="ic-notch"></div>${label}</div>`;
 }
@@ -1240,7 +1245,7 @@ function renderComponentInner(comp, def) {
   const bodyHtml = def.render ? def.render(comp) : '';
   const isDip = def.kind === 'dip';
   const bodyLeft = -6;
-  const bodyTop = isDip ? -14 : -6;
+  const bodyTop = isDip ? -DIP_MARGIN : -6;
   // The body graphic rotates as a rigid CSS transform. At 90/270deg it pivots on the anchor
   // pin (dx=dy=0), matching the coordinate-rotated pin offsets. At 180deg a straddle part
   // uses the explicit row/column swap (getStraddleFlipOffsets) instead of coordinate math
@@ -1278,7 +1283,19 @@ function renderComponentInner(comp, def) {
     state.pinEls.push({ el: pinEl, compId: comp.id, pinNum: p.n });
     const lbl = document.createElement('div');
     lbl.className = 'pin-label';
-    if (isStraddle && thinMax > thinMin) {
+    if (isDip && thinMax > thinMin) {
+      // Keep the number inside the body: nudge it into the margin strip next to its own
+      // row (DIP_MARGIN-wide on both sides, see renderDipBody) instead of outside the part.
+      const isNearSide = off[thinAxis] === thinMin;
+      const inset = isNearSide ? -12 : 3;
+      if (thinAxis === 'dy') {
+        lbl.style.left = (off.dx - 3) + 'px';
+        lbl.style.top = (off.dy + inset) + 'px';
+      } else {
+        lbl.style.left = (off.dx + inset) + 'px';
+        lbl.style.top = (off.dy - 3) + 'px';
+      }
+    } else if (isStraddle && thinMax > thinMin) {
       const isNearSide = off[thinAxis] === thinMin;
       if (thinAxis === 'dy') {
         lbl.style.left = (off.dx - 3) + 'px';
