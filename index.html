@@ -16,6 +16,14 @@
         <input type="color" id="wireColorInput" value="#e63946">
       </label>
       <span id="wireStyleLabel" class="wire-style-label" title="사이드바에서 연결선/점퍼선 종류를 클릭해 바꿀 수 있습니다">스타일: 브레드보드 연결선</span>
+      <label class="wire-view-picker">배선 보기
+        <select id="wireViewSelect">
+          <option value="datapath" selected>데이터 경로</option>
+          <option value="control">제어선</option>
+          <option value="power">전원선</option>
+          <option value="all">전체</option>
+        </select>
+      </label>
       <button type="button" id="btnDeleteSelected" class="btn">선택 삭제 (Del)</button>
       <button type="button" id="btnClearWires" class="btn">배선 전체 삭제</button>
       <button type="button" id="btnClearAll" class="btn danger">전체 초기화</button>
@@ -36,6 +44,7 @@
     <section id="workspaceWrap">
       <div id="workspace">
         <div id="viewport">
+          <div id="boardsLayer"></div>
           <svg id="wireLayer"></svg>
           <div id="componentsLayer"></div>
         </div>

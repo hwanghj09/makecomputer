@@ -15,6 +15,8 @@ html, body {
 #topbar h1 { font-size: 16px; margin: 0; color: #fff; font-weight: 600; white-space: nowrap; }
 .topbar-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 13px; }
 .wire-color-picker { display: flex; align-items: center; gap: 4px; }
+.wire-view-picker { display: flex; align-items: center; gap: 5px; color: #c9d6e2; }
+.wire-view-picker select { background: #20242c; color: #eef7ff; border: 1px solid #46515f; border-radius: 4px; padding: 4px 6px; }
 .wire-style-label { color: #9fd3ff; font-size: 11px; }
 .wire-color-picker input[type=color] { width: 28px; height: 22px; border: none; background: none; cursor: pointer; }
 .btn {
@@ -42,11 +44,12 @@ html, body {
 }
 #workspace.panning { cursor: grabbing; }
 #viewport { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
-#wireLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; pointer-events: none; z-index: 15; overflow: visible; }
+#boardsLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; z-index: 5; pointer-events: none; }
+#wireLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; pointer-events: none; z-index: 10; overflow: visible; }
 #wireLayer path.wire { pointer-events: stroke; cursor: grab; }
 #wireLayer path.wire.selected { filter: drop-shadow(0 0 3px #fff); }
 #wireLayer path.wire.conflict { stroke: #ff2d2d !important; stroke-dasharray: 4 3; }
-#componentsLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; z-index: 10; pointer-events: none; }
+#componentsLayer { position: absolute; top: 0; left: 0; width: 3000px; height: 2000px; z-index: 15; pointer-events: none; }
 
 #zoomControls {
   position: absolute; right: 14px; bottom: 14px; z-index: 50;
@@ -108,8 +111,15 @@ html, body {
 .bb-row { display: flex; }
 .bb-gap { height: 10px; }
 .hole {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: #55524a; box-shadow: inset 0 1px 2px rgba(0,0,0,0.6);
+  /* box-sizing is border-box globally, so the 4px transparent border eats into this box's
+     own 18px instead of adding to it - net content/background stays 10px (18 - 2*4), same
+     visible size as before, while the clickable border-box grows to 18px (JS offset -9
+     instead of -5) so jumper-wire endpoints are easier to land on. */
+  width: 18px; height: 18px; border-radius: 50%;
+  background: #55524a; background-clip: padding-box;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.6);
+  border: 4px solid transparent;
+  outline-offset: -4px;
   position: absolute;
 }
 .hole.energized-h { background: #ff5252; }
@@ -129,8 +139,15 @@ html, body {
 }
 .part-body.selected { outline: 2px dashed #ffd166; }
 .pin {
-  position: absolute; width: 10px; height: 10px; border-radius: 50%;
-  background: #ccc; border: 1px solid #555; cursor: crosshair; z-index: 20;
+  /* box-sizing is border-box globally, so this 18px box minus the 4px transparent border
+     nets a 10px visible dot (ring drawn via inset shadow instead of a real border) - same
+     look as before, but a bigger clickable area (JS offset -9 instead of -5). */
+  position: absolute; width: 18px; height: 18px; border-radius: 50%;
+  background: #ccc; background-clip: padding-box;
+  box-shadow: inset 0 0 0 1px #555;
+  border: 4px solid transparent;
+  outline-offset: -4px;
+  cursor: crosshair; z-index: 20;
 }
 .pin.energized-h { background: #ff5252; }
 .pin.energized-l { background: #4d7cff; }
@@ -213,6 +230,14 @@ html, body {
 .jumper-label {
   background: #2b2f38; border: 1px solid #444; border-radius: 3px; color: #ddd;
   font-size: 9px; padding: 2px 4px;
+}
+
+.module-label {
+  min-width: 150px; padding: 5px 12px; border: 1px solid #63d5ff;
+  border-radius: 5px; background: #10141de6; color: #dff7ff;
+  font: 700 13px/1.2 "Segoe UI", "Malgun Gothic", sans-serif;
+  letter-spacing: .04em; text-align: center; white-space: nowrap;
+  box-shadow: 0 2px 8px #0008; pointer-events: none;
 }
 
 .status-badge {

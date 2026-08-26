@@ -51,6 +51,7 @@ const state = {
   pinEls: [],       // {el, compId, pinNum}
   activeWireColor: '#e63946',
   activeWireStyle: 'short',
+  wireView: 'datapath',
   view: { zoom: 1, panX: 0, panY: 0 }, // pan/zoom camera for the workspace
   history: { past: [], future: [] }, // Ctrl+Z / Ctrl+Y undo-redo (whole-state snapshots)
   clipboard: null, pasteCount: 0,     // Ctrl+C / Ctrl+V
@@ -971,6 +972,15 @@ PARTS['hc161'].refresh = function (comp) {
 };
 
 PARTS['board_long'] = { name: '긴 브레드보드', category: 'board', isBoard: true };
+PARTS['module_label'] = {
+  name: '모듈 라벨', category: 'wire', hidden: true, pins: [], footprint: { w: 0, h: 0 },
+  render(comp) {
+    const text = String(comp.state?.text || '').replace(/[&<>"']/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[ch]);
+    return `<div class="module-label">${text}</div>`;
+  },
+};
 
 /* =========================================================================
  * Rendering / placement / drag engine (Part 5/5)
@@ -1139,8 +1149,8 @@ function renderBoardDom(board) {
       hole.className = 'hole';
       hole.dataset.board = board.id; hole.dataset.row = row; hole.dataset.col = c;
       hole.style.position = 'absolute';
-      hole.style.left = (off.x - 5) + 'px';
-      hole.style.top = (off.y - 5) + 'px';
+      hole.style.left = (off.x - 9) + 'px';
+      hole.style.top = (off.y - 9) + 'px';
       el.appendChild(hole);
       board.holeEls.push({ el: hole, boardId: board.id, row, col: c });
     }
@@ -1168,7 +1178,7 @@ function renderBoardDom(board) {
     if (state.pendingWire) return;
     startDragBoard(e, board);
   });
-  document.getElementById('componentsLayer').appendChild(el);
+  document.getElementById('boardsLayer').appendChild(el);
   board.el = el;
   state.holeEls.push(...board.holeEls);
 }
@@ -1277,8 +1287,8 @@ function renderComponentInner(comp, def) {
     pinEl.className = 'pin';
     pinEl.dataset.comp = comp.id; pinEl.dataset.pin = p.n;
     pinEl.title = `${def.name} - pin ${p.n} (${p.label})`;
-    pinEl.style.left = (off.dx - 5) + 'px';
-    pinEl.style.top = (off.dy - 5) + 'px';
+    pinEl.style.left = (off.dx - 9) + 'px';
+    pinEl.style.top = (off.dy - 9) + 'px';
     comp.el.appendChild(pinEl);
     state.pinEls.push({ el: pinEl, compId: comp.id, pinNum: p.n });
     const lbl = document.createElement('div');
@@ -1286,13 +1296,16 @@ function renderComponentInner(comp, def) {
     if (isDip && thinMax > thinMin) {
       // Keep the number inside the body: nudge it into the margin strip next to its own
       // row (DIP_MARGIN-wide on both sides, see renderDipBody) instead of outside the part.
+      // The dx case (90/270deg) needs a bigger outward nudge than dy (0/180deg): text laid
+      // out left-to-right starts filling ink right at its `left` coordinate, while vertical
+      // text gets implicit clearance from line-height/baseline - so the same small offset
+      // that clears the pin dot vertically still overlaps it horizontally.
       const isNearSide = off[thinAxis] === thinMin;
-      const inset = isNearSide ? -12 : 3;
       if (thinAxis === 'dy') {
         lbl.style.left = (off.dx - 3) + 'px';
-        lbl.style.top = (off.dy + inset) + 'px';
+        lbl.style.top = (isNearSide ? off.dy - 12 : off.dy + 3) + 'px';
       } else {
-        lbl.style.left = (off.dx + inset) + 'px';
+        lbl.style.left = (isNearSide ? off.dx - 12 : off.dx + 8) + 'px';
         lbl.style.top = (off.dy - 3) + 'px';
       }
     } else if (isStraddle && thinMax > thinMin) {
@@ -1472,11 +1485,12 @@ function serializeState() {
   return JSON.parse(JSON.stringify({
     boards: state.boards.map(b => ({ id: b.id, x: b.x, y: b.y, cols: b.cols })),
     components: state.components.map(c => ({ id: c.id, type: c.type, x: c.x, y: c.y, rot: c.rot || 0, pinPlug: c.pinPlug, state: c.state })),
-    wires: state.wires.map(w => ({ id: w.id, a: w.a, b: w.b, color: w.color, style: w.style, points: w.points || [] })),
+    wires: state.wires.map(w => ({ id: w.id, a: w.a, b: w.b, color: w.color, width: w.width, group: w.group, style: w.style, points: w.points || [] })),
   }));
 }
 function restoreState(snap) {
   document.getElementById('componentsLayer').innerHTML = '';
+  document.getElementById('boardsLayer').innerHTML = '';
   state.boards = []; state.components = []; state.wires = [];
   state.holeEls = []; state.pinEls = []; state.selection = null;
   clearPending();
@@ -1629,7 +1643,7 @@ function removeNearestBendPoint(wire, x, y) {
 }
 
 function setupWiringHandlers() {
-  const layer = document.getElementById('componentsLayer');
+  const layer = document.getElementById('viewport');
   layer.addEventListener('pointerdown', e => {
     const el = e.target.closest('.hole,.pin');
     if (!el) return;
@@ -1780,6 +1794,10 @@ function updateWires() {
   const svg = document.getElementById('wireLayer');
   svg.innerHTML = '';
   for (const w of state.wires) {
+    const group = w.group || 'data';
+    if (state.wireView === 'datapath' && !['bus', 'data', 'result'].includes(group)) continue;
+    if (state.wireView === 'control' && group !== 'control') continue;
+    if (state.wireView === 'power' && group !== 'power') continue;
     const a = connectorWorldPos(w.a), b = connectorWorldPos(w.b);
     if (!a || !b) continue;
     let d;
@@ -1790,6 +1808,18 @@ function updateWires() {
       const midY = (a.y + b.y) / 2 + droop;
       d = `M ${a.x} ${a.y} C ${a.x} ${midY}, ${b.x} ${midY}, ${b.x} ${b.y}`;
     }
+    // A wide, invisible path underneath the thin visible stroke so clicking/selecting a
+    // wire (to bend, delete, etc.) doesn't require landing a pointer exactly on 3px of line.
+    // It shares the 'wire' class and wireId so every existing path.wire handler picks it up.
+    const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    hitPath.setAttribute('d', d);
+    hitPath.setAttribute('class', 'wire wire-hitarea');
+    hitPath.setAttribute('stroke', 'transparent');
+    hitPath.setAttribute('stroke-width', '16');
+    hitPath.setAttribute('fill', 'none');
+    hitPath.dataset.wireId = w.id;
+    svg.appendChild(hitPath);
+
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', d);
     let cls = 'wire';
@@ -1798,7 +1828,7 @@ function updateWires() {
     if (root != null && state.nodeConflict.has(root)) cls += ' conflict';
     path.setAttribute('class', cls);
     path.setAttribute('stroke', w.color);
-    path.setAttribute('stroke-width', '3');
+    path.setAttribute('stroke-width', String(w.width || 3));
     path.setAttribute('fill', 'none');
     path.dataset.wireId = w.id;
     svg.appendChild(path);
@@ -1844,6 +1874,7 @@ function renderSidebar(filter) {
   const f = (filter || '').toLowerCase();
   const cats = {};
   for (const [id, def] of Object.entries(PARTS)) {
+    if (def.hidden) continue;
     if (f && !(def.name.toLowerCase().includes(f) || id.toLowerCase().includes(f))) continue;
     (cats[def.category] = cats[def.category] || []).push([id, def]);
   }
@@ -1923,6 +1954,9 @@ function setupToolbar() {
   const wireColorInput = document.getElementById('wireColorInput');
   state.activeWireColor = wireColorInput.value;
   wireColorInput.addEventListener('input', () => { state.activeWireColor = wireColorInput.value; });
+  const wireViewSelect = document.getElementById('wireViewSelect');
+  state.wireView = wireViewSelect.value;
+  wireViewSelect.addEventListener('change', () => { state.wireView = wireViewSelect.value; });
   document.getElementById('btnDeleteSelected').addEventListener('click', deleteSelection);
   document.getElementById('btnClearWires').addEventListener('click', () => {
     if (!state.wires.length) return;
@@ -1934,6 +1968,7 @@ function setupToolbar() {
     if (!confirm('작업 공간의 모든 부품과 배선을 삭제합니다. 계속할까요?')) return;
     pushHistory();
     document.getElementById('componentsLayer').innerHTML = '';
+    document.getElementById('boardsLayer').innerHTML = '';
     state.boards = []; state.components = []; state.wires = [];
     state.holeEls = []; state.pinEls = []; state.selection = null;
     clearPending();
