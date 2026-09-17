@@ -1,25 +1,65 @@
 # MAKECOMPUTER/8 단계별 만들기
 
-`컴퓨터만들기.md`는 최종 배선표이고, 이 폴더는 그 내용을 **초보자가 실제로 하나씩 만들고 바로 테스트할 수 있도록** 다시 나눈 설명서다.
+이 폴더는 `컴퓨터만들기.md`의 최종 배선표를 **실제로 처음부터 만드는 순서**로 다시 설명한 초보자용 제작 설명서다.
 
-## 사용 방법
+## 가장 중요한 원칙
 
-1. 아래 파일을 번호 순서대로 연다.
-2. 한 번에 한 모듈만 배선한다.
-3. 각 IC의 핀 번호와 점퍼선 색을 확인하면서 한 줄씩 연결한다.
-4. 문서의 테스트를 통과한 뒤에만 다음 단계로 넘어간다.
-5. 문제가 생기면 전체를 뜯지 말고 마지막으로 추가한 모듈만 다시 확인한다.
+이 폴더에서는 **아직 만들지 않은 부품이나 신호를 미리 연결하지 않는다.**
 
-## 공통 규칙
+예를 들어 1단계에서 `DB`, `PC`, `MAR`, `U28` 같은 것이 아직 나오지 않았다면:
 
-- 전원을 끈 상태에서 배선
-- 모든 논리 IC는 +5V
-- 모든 GND 공통
-- IC마다 0.1µF 디커플링
-- LED 테스트는 330Ω~1kΩ 직렬 저항 사용
-- 사용하지 않는 74HC 입력은 floating 금지
+- 그 용어를 몰라도 된다.
+- 그 선을 연결하지 않는다.
+- 나중 단계에서 처음 만들 때 뜻부터 설명한다.
 
-## 점퍼선 색
+각 단계는 아래 순서를 따른다.
+
+```text
+새로운 용어 설명
+   ↓
+이번에 필요한 부품만 꽂기
+   ↓
+전원 연결
+   ↓
+핀 한 줄씩 배선
+   ↓
+그 부품만 단독 테스트
+   ↓
+정상 확인
+   ↓
+이미 만든 앞 단계와 연결
+   ↓
+다음 단계
+```
+
+즉 `최종 배선표를 한꺼번에 꽂는 방식`이 아니라 **진짜 제작 순서**로 진행한다.
+
+---
+
+## 사용하는 방법
+
+1. 반드시 번호 순서대로 연다.
+2. 문서에 처음 나오는 단어는 바로 위 설명부터 읽는다.
+3. `지금은 연결하지 않는다`라고 적힌 핀은 그대로 둔다.
+4. 테스트용 HIGH/LOW 점퍼는 그 단계 테스트가 끝날 때까지만 사용한다.
+5. 테스트를 통과한 다음 단계에서 최종 연결로 바꾼다.
+6. 한 단계가 실패하면 다음 단계로 가지 않는다.
+
+---
+
+## 공통 안전 규칙
+
+- 배선 변경은 전원을 끄고 한다.
+- 모든 논리 IC 전원은 +5V다.
+- 모든 GND는 서로 연결한다.
+- 각 IC VCC-GND 바로 옆에 0.1µF 디커플링 커패시터를 단다.
+- LED 테스트는 330Ω~1kΩ 직렬 저항을 사용한다.
+- 사용하지 않는 CMOS 입력은 floating 상태로 두지 않는다.
+- 칩이 뜨거워지면 즉시 전원을 끈다.
+
+---
+
+## 점퍼선 색 규칙
 
 | 색 | 역할 |
 |---|---|
@@ -31,23 +71,68 @@
 | 🟧 주황 | CONTROL |
 | ⬜ 흰색 | STATUS / FLAG / SPECIAL |
 
-## 단계
+처음에는 색 이름을 전부 외울 필요 없다. 각 파일에서 **왜 그 색인지 같이 설명한다.**
 
-| 파일 | 만드는 것 | 주요 IC |
-|---|---|---|
-| [01_전원과_클럭.md](./01_전원과_클럭.md) | 전원 + Clock | U1 |
-| [02_PC_MAR_Address.md](./02_PC_MAR_Address.md) | PC, MAR, Address MUX, RAM Bank Decoder | U2,U3,U16,U21,U22,U26 |
-| [03_RAM과_DATA_BUS.md](./03_RAM과_DATA_BUS.md) | RAM 160byte, RAM BUS, Manual Input | U5~U9,U18,U20 |
-| [04_A_Register_ALU.md](./04_A_Register_ALU.md) | A Register, ADD/SUB ALU, ALU BUS | U10~U14,U19,U23,U24 |
-| [05_IR_Microstep_Decoder_OUT.md](./05_IR_Microstep_Decoder_OUT.md) | IR, 명령 Decoder, Microstep, OUT | U4,U15,U17,U25,U27,U51,U63 |
-| [06_Control_Logic.md](./06_Control_Logic.md) | 전체 제어 논리 | U28~U49 |
-| [07_Flag_BootROM.md](./07_Flag_BootROM.md) | Z/MONITOR/HALT/KEY 상태 + Boot ROM | U52,U53,U60,U61 |
-| [08_IO_LCD.md](./08_IO_LCD.md) | Memory-Mapped I/O + LCD | U50,LCD1 |
-| [09_PS2_Keyboard.md](./09_PS2_Keyboard.md) | PS/2 Keyboard | U54~U59,U62,U64,Q1 |
-| [10_전체통합_최종테스트.md](./10_전체통합_최종테스트.md) | 전체 통합과 최종 확인 | 전체 |
+---
 
-## 현재 실제 제작 위치
+## 제작 순서
 
-현재까지 이미 만든 부분은 Clock, 8bit PC, MAR, Address MUX이며, 다음 실제 작업은 **U26 RAM Bank Decoder 검증 → U5 RAM #1** 순서로 진행하면 된다.
+| 파일 | 이번 파일에서 처음 만드는 것 |
+|---|---|
+| [01_전원과_클럭.md](./01_전원과_클럭.md) | +5V/GND, NE555 Clock |
+| [02_PC_MAR_Address.md](./02_PC_MAR_Address.md) | PC, MAR, Address Bus, RAM Bank Decoder |
+| [03_RAM과_DATA_BUS.md](./03_RAM과_DATA_BUS.md) | RAM, RAM_D, DB0~DB7, Manual Input |
+| [04_A_Register_ALU.md](./04_A_Register_ALU.md) | A Register, ADD/SUB ALU |
+| [05_IR_Microstep_Decoder_OUT.md](./05_IR_Microstep_Decoder_OUT.md) | IR, 명령 Decoder, Microstep, OUT |
+| [06_Control_Logic.md](./06_Control_Logic.md) | 자동 Control Logic U28~U49 |
+| [07_Flag_BootROM.md](./07_Flag_BootROM.md) | Z Flag, Monitor Mode, Boot ROM |
+| [08_IO_LCD.md](./08_IO_LCD.md) | Memory-Mapped I/O, LCD |
+| [09_PS2_Keyboard.md](./09_PS2_Keyboard.md) | PS/2 Keyboard |
+| [10_전체통합_최종테스트.md](./10_전체통합_최종테스트.md) | 전체 통합 |
 
-`컴퓨터만들기.md`와 이 폴더가 서로 다르면 **`컴퓨터만들기.md`의 최종 핀 배선 번호를 우선**하고, 이 폴더는 제작 순서와 테스트 방법을 위한 설명서로 사용한다.
+---
+
+## 1~3단계에서 특히 달라진 점
+
+초기 설명서에는 최종 배선 대상인 `U28`, `U33`, `U49` 같은 **아직 만들지 않은 IC 이름이 너무 일찍 등장**했다.
+
+현재는 이렇게 수정했다.
+
+### 1단계
+
+```text
+전원 → NE555 → LED 깜빡임
+```
+
+만 한다. `DB`, `PC`, `U28`을 몰라도 된다.
+
+### 2단계
+
+```text
+NE555 → PC → MAR → Address MUX → U26
+```
+
+순서로 하나씩 만든다.
+
+최종 제어회로가 아직 없기 때문에 `/LOAD`, Select 같은 제어 입력은 **테스트용 +5V/GND 점퍼**로 직접 넣는다.
+
+### 3단계
+
+처음으로 `DATA`와 `DATA BUS(DB0~DB7)`의 뜻을 설명한 뒤 RAM을 연결한다.
+
+RAM의 MRD/MWR도 U33/U49에 바로 연결하지 않고, 먼저 수동 HIGH/LOW로 Read/Write를 성공시킨다.
+
+---
+
+## 현재 제작 위치
+
+이미 실제로 만든 회로가 있다면 그 부분을 뜯을 필요는 없다.
+
+현재까지 정상 동작한 Clock, PC, MAR, Address MUX는 그대로 두고 해당 문서의 **테스트 항목만 다시 확인**하면 된다.
+
+그 다음 U26 RAM Bank Decoder부터 이어서 진행하면 된다.
+
+---
+
+`컴퓨터만들기.md`는 최종 전체 연결을 확인하는 **최종 배선 참고서**이고,
+`단계별 만들기/`는 실제 제작할 때 보는 **작업 순서 설명서**다.
