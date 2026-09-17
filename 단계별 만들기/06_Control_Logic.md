@@ -1,372 +1,559 @@
-# 18~21단계 — Control Logic U28~U49
+# 6단계 — 자동 제어 논리 만들기
 
-> 이 파일은 가장 복잡하다. **한 IC 전체를 한 번에 만들지 말고 게이트 하나씩** `입력 2개 → 출력 1개`로 연결하고 바로 테스트한다.
->
-> - 74HC08 = AND: 11일 때만 1
-> - 74HC32 = OR: 둘 중 하나라도 1이면 1
-> - 74HC04 = NOT: 입력의 반대
-> - 7번=GND, 14번=+5V인 14핀 논리 IC가 대부분이다.
+> 이 파일에서는 칩 번호 별칭을 쓰지 않는다. 같은 74HC08/74HC32/74HC04라도 **역할 이름**으로 구분한다.
 
-## U28 — 74HC08 CPU Clock + BYTE2
-1. 🟦 RAW_CLK←U1-3
-2. ⬜ RUN_EN←U53-8
-3. 🟦 CPU_CLK→U2-2,U3-2,U4-2
-4. 🟧 NOP_N←U51-4
-5. 🟧 OUT_N←U27-11
-6. 🟧 BYTE2_A→U28-9
-7. ⬛ GND
-8. 🟧 BYTE2→U28-13
-9. 🟧 BYTE2_A←U28-6
-10. 🟧 HLT_N←U27-9
-11. 🟧 T3_BYTE2→U29-1,U39-10
-12. 🟧 T3←U46-8
-13. 🟧 BYTE2←U28-8
-14. 🟥 +5V
+이 단계가 가장 복잡하다. 한꺼번에 만들지 않는다.
 
-**테스트:** U28-1/2가 둘 다 HIGH일 때만 U28-3이 HIGH인지 확인.
-
-## U29 — 74HC08 MAR / A_EXEC
-1. 🟧 T3_BYTE2←U28-11
-2. 🟧 LDI_N←U51-5
-3. 🟧 MAR_EN→U29-5
-4. 🟦 CPU_CLK←U28-3
-5. 🟧 MAR_EN←U29-3
-6. 🟦 MAR_CLK→U16-11
-7. ⬛ GND
-8. 🟧 AEXEC_TMP→U29-12
-9. 🟧 LDA_N←U27-5
-10. 🟧 ADD_N←U27-7
-11. 🟧 A_EXEC_N→U30-2,U32-12
-12. 🟧 AEXEC_TMP←U29-8
-13. 🟧 SUB_N←U27-12
-14. 🟥 +5V
-
-## U30 — 74HC08 A_CLK / IR_CLK / ADD+SUB
-1. 🟧 LDI_T3_N←U39-11
-2. 🟧 T5_AEXEC_N←U40-3
-3. 🟧 A_EN_N→U46-13
-4. 🟦 CPU_CLK←U28-3
-5. 🟧 A_EN←U46-12
-6. 🟦 A_CLK→U14-11,U35-4
-7. ⬛ GND
-8. 🟦 IR_CLK→U15-11
-9. 🟦 CPU_CLK←U28-3
-10. 🟧 T1←U46-6
-11. 🟧 ADD_SUB_N→U31-4,U34-13,U47-1
-12. 🟧 ADD_N←U27-7
-13. 🟧 SUB_N←U27-12
-14. 🟥 +5V
-
-**테스트:** CPU_CLK와 T1이 둘 다 HIGH일 때만 IR_CLK가 HIGH인지 확인.
-
-## U31 — 74HC08 SUB/CMP + Z Clock + Jump
-1. 🟧 SUB_N←U27-12
-2. 🟧 CMP_N←U51-6
-3. 🟧 SUBCMP_N→U47-3
-4. 🟧 ADD_SUB_N←U30-11
-5. 🟧 CMP_N←U51-6
-6. 🟧 ARITH_N→U40-5
-7. ⬛ GND
-8. 🟦 Z_CLK→U52-3
-9. 🟦 CPU_CLK←U28-3
-10. 🟧 Z_EN←U47-6
-11. 🟧 JUMP_PAIR1_N→U32-4
-12. 🟧 JMP_N←U27-10
-13. 🟧 RUN_N←U51-11
-14. 🟥 +5V
-
-## U32 — 74HC08 Jump / Address Select / Readop
-1. 🟧 JZ_TAKE_N←U40-8
-2. 🟧 JNZ_TAKE_N←U40-11
-3. 🟧 JUMP_PAIR2_N→U32-5
-4. 🟧 JUMP_PAIR1_N←U31-11
-5. 🟧 JUMP_PAIR2_N←U32-3
-6. 🟧 JUMP_ANY_N→U41-2
-7. ⬛ GND
-8. 🟧 ADDR_LOW→U47-9
-9. 🟧 T4_N←U25-11
-10. 🟧 T5_N←U25-10
-11. 🟧 READOP_N→U42-2
-12. 🟧 A_EXEC_N←U29-11
-13. 🟧 CMP_N←U51-6
-14. 🟥 +5V
+```text
+74HC08 AND 칩 1개 연결
+↓
+그 칩의 각 게이트 테스트
+↓
+다음 AND 칩
+↓
+74HC32 OR 칩
+↓
+74HC04 NOT 칩
+↓
+전체 연결
+```
 
 ---
 
-## U33 — 74HC08 RAM Read / RAM Valid
-1. 🟧 PROG_READ_N←U41-11
-2. 🟧 DATA_READ_N←U42-3
-3. 🟧 RAM_MRD_N→U5-16,U6-16,U7-16,U8-16,U9-16
-4. 🟧 PROG_READ_N←U41-11
-5. 🟧 LDA_T5_N←U42-8
-6. 🟧 RAM_BUS_READ_N→U33-9
-7. ⬛ GND
-8. 🟧 ACCESS_N→U46-11
-9. 🟧 RAM_BUS_READ_N←U33-6
-10. 🟧 STA_T5_N←U42-6
-11. 🟧 RAMVALID_TMP→U34-1
-12. 🟧 U26-10(Y5)
-13. 🟧 U26-9(Y6)
-14. 🟥 +5V
+# 6-1. 먼저 알아야 하는 것
 
-## U34 — 74HC08 RAM BUS enable + A/OUT/ALU
-1. 🟧 RAMVALID_TMP←U33-11
-2. 🟧 U26-7(Y7)
-3. 🟧 RAM_VALID→U34-5
-4. 🟧 ACCESS_POS←U46-10
-5. 🟧 RAM_VALID←U34-3
-6. 🟧 U18_EN_POS→U48-13
-7. ⬛ GND
-8. 🟧 AOUT_TMP1→U34-12
-9. 🟧 STA_N←U27-6
-10. 🟧 OUT_N←U27-11
-11. 🟧 AOUTALU_N→U42-13
-12. 🟧 AOUT_TMP1←U34-8
-13. 🟧 ADD_SUB_N←U30-11
-14. 🟥 +5V
+## AND
 
-## U35 — 74HC08 Keyboard/LCD + KEY ACK
-1. 🟧 U50-15
-2. 🟧 U50-14
-3. 🟧 KEYSEL_N→U43-5
-4. 🟦 A_CLK←U30-6
-5. 🟧 KEY_ACK_COND←U49-6
-6. 🟧 KEY_ACK_PULSE→U49-9
-7. ⬛ GND
-8. 🟦 KEY_CLR_N→U53-1,U64-1
-9. 🟦 RESET_N
-10. 🟧 KEY_ACK_PULSE_N←U49-8
-11. 🟧 LCDSEL_N→U43-13
-12. 🟧 U50-13
-13. 🟧 U50-12
-14. 🟥 +5V
+74HC08은 입력 두 개가 모두 HIGH일 때만 출력이 HIGH다.
 
-## U36 — 74HC08 OUT/LCD + PS/2 Count
-1. 🟧 OUT_T5_N←U44-3
-2. 🟧 LCD_WRITE_N←U43-11
-3. 🟧 OUT_EN_N→U48-1
-4. 🟦 CPU_CLK←U28-3
-5. 🟧 OUT_EN←U48-2
-6. 🟦 OUT_CLK→U17-11
-7. ⬛ GND
-8. 🟧 LCD_E→LCD1-6
-9. 🟦 CPU_CLK←U28-3
-10. 🟧 LCD_WRITE←U47-12
-11. ⬜ HIGHPAIR→U37-2
-12. ⬜ U64-11(QD)
-13. ⬜ QC_N←U48-8
-14. 🟥 +5V
+```text
+0 AND 0 = 0
+0 AND 1 = 0
+1 AND 0 = 0
+1 AND 1 = 1
+```
 
-## U37 — 74HC08 PS/2 + RAM Write pulse
-1. ⬜ LOWPAIR←U48-10
-2. ⬜ HIGHPAIR←U36-11
-3. ⬜ COUNT11→U37-5
-4. 🟦 PS2_INV_CLK←U62-2
-5. ⬜ KEY_READY_N←U53-6
-6. 🟦 PS2_SAMPLE_CLK→U54-8,U55-8,U64-2
-7. ⬛ GND
-8. 🟦 FRAME_CLK→U53-3
-9. 🟦 PS2_POST_CLK←U62-4
-10. ⬜ COUNT11←U37-3
-11. 🟧 RAM_WRITE_PULSE→U49-3
-12. 🟦 CPU_CLK←U28-3
-13. 🟧 STA_T5←U49-2
-14. 🟥 +5V
+## OR
 
-## U38 — 74HC08 예비
-1,2,4,5,7,9,10,12,13. ⬛ GND
-3,6,8,11. 배선 없음 출력
-14. 🟥 +5V
+74HC32는 둘 중 하나라도 HIGH면 출력이 HIGH다.
+
+## NOT
+
+74HC04는 입력을 뒤집는다.
+
+```text
+0 → 1
+1 → 0
+```
+
+## `_N` 이름
+
+`LDA_N`, `T5_N`, `PC_LOAD_N`처럼 끝에 `_N`이 붙은 신호는 보통 **LOW가 활성**이다.
+
+예:
+
+```text
+LDA_N = LOW  → 현재 명령이 LDA
+HLT_N = LOW  → 현재 명령이 HLT
+```
 
 ---
 
-## U39 — 74HC32 확장명령 / PC_COUNT / LDI
-1. 🟧 EXT_VALID_N←U63-4
-2. 🟧 IR2←U15-6
-3. 🟧 EXT_LO_EN_N→U51-1
-4. 🟧 EXT_VALID_N←U63-4
-5. 🟧 IR2_N←U46-4
-6. 🟧 EXT_HI_EN_N→U51-15
-7. ⬛ GND
-8. 🟧 PC_COUNT→U2-10,U47-11
-9. 🟧 T1←U46-6
-10. 🟧 T3_BYTE2←U28-11
-11. 🟧 LDI_T3_N→U30-1
-12. 🟧 T3_N←U25-12
-13. 🟧 LDI_N←U51-5
-14. 🟥 +5V
+# 6-2. 74HC08 / 74HC32 공통 핀 구조
 
-## U40 — 74HC32 A_EN / Z_EN / JZ/JNZ
-1. 🟧 T5_N←U25-10
-2. 🟧 A_EXEC_N←U29-11
-3. 🟧 T5_AEXEC_N→U30-2
-4. 🟧 T5_N←U25-10
-5. 🟧 ARITH_N←U31-6
-6. 🟧 Z_EN_N→U47-5
-7. ⬛ GND
-8. 🟧 JZ_TAKE_N→U32-1
-9. 🟧 JZ_N←U51-7
-10. ⬜ Z_N←U52-6
-11. 🟧 JNZ_TAKE_N→U32-2
-12. 🟧 JNZ_N←U51-12
-13. ⬜ Z←U52-5
-14. 🟥 +5V
+두 칩 모두 14핀이고 게이트 4개가 들어 있다.
 
-## U41 — 74HC32 PC_LOAD / RUN / HLT / Read
-1. 🟧 T5_N←U25-10
-2. 🟧 JUMP_ANY_N←U32-6
-3. 🟧 PC_LOAD_N→U2-9,U3-9
-4. 🟧 T5_N←U25-10
-5. 🟧 RUN_N←U51-11
-6. 🟧 RUN_T5_N→U52-13
-7. ⬛ GND
-8. 🟧 HLT_T5_N→U53-10
-9. 🟧 T5_N←U25-10
-10. 🟧 HLT_N←U27-9
-11. 🟧 PROG_READ_N→U33-1,U33-4
-12. ⬜ MONITOR_MODE←U52-9
-13. 🟧 PC_COUNT_N←U47-10
-14. 🟥 +5V
+```text
+1,2 → 3
+4,5 → 6
+9,10 → 8
+12,13 → 11
+7 = GND
+14 = +5V
+```
 
-## U42 — 74HC32 Read/Write/BUS
-1. 🟧 T5_N←U25-10
-2. 🟧 READOP_N←U32-11
-3. 🟧 DATA_READ_N→U33-2
-4. 🟧 STA_N←U27-6
-5. 🟧 T5_N←U25-10
-6. 🟧 STA_T5_N→U18-1,U33-10,U49-1,U43-12
-7. ⬛ GND
-8. 🟧 LDA_T5_N→U33-5,U43-4,U43-9
-9. 🟧 LDA_N←U27-5
-10. 🟧 T5_N←U25-10
-11. 🟧 U19_OE_N→U19-19
-12. 🟧 T5_N←U25-10
-13. 🟧 AOUTALU_N←U34-11
-14. 🟥 +5V
+74HC04는:
 
-## U43 — 74HC32 Boot/Keyboard/LCD BUS
-1. ⬜ MONITOR_N←U52-8
-2. 🟧 PC_COUNT_N←U47-10
-3. 🟧 U61_OE_N→U61-19
-4. 🟧 LDA_T5_N←U42-8
-5. 🟧 KEYSEL_N←U35-3
-6. 🟧 KEY_READ_N→U59-19
-7. ⬛ GND
-8. 🟧 KEY_ACK_COND_N→U49-5
-9. 🟧 LDA_T5_N←U42-8
-10. 🟧 U50-14
-11. 🟧 LCD_WRITE_N→U47-13,U36-2
-12. 🟧 STA_T5_N←U42-6
-13. 🟧 LCDSEL_N←U35-11
-14. 🟥 +5V
+```text
+1 → 2
+3 → 4
+5 → 6
+9 → 8
+11 → 10
+13 → 12
+7 = GND
+14 = +5V
+```
+
+각 칩을 꽂을 때 7번 GND, 14번 +5V, 0.1µF 커패시터부터 연결한다.
 
 ---
 
-## U44 — 74HC32 OUT + Zero Tree
-1. 🟧 OUT_N←U27-11
-2. 🟧 T5_N←U25-10
-3. 🟧 OUT_T5_N→U36-1
-4. 🟩 ALU0←U10-4
-5. 🟩 ALU1←U10-1
-6. ⬜ ZERO01→U45-4
-7. ⬛ GND
-8. ⬜ ZERO23→U45-5
-9. 🟩 ALU2←U10-13
-10. 🟩 ALU3←U10-10
-11. ⬜ ZERO45→U45-9
-12. 🟩 ALU4←U11-4
-13. 🟩 ALU5←U11-1
-14. 🟥 +5V
+# 6-3. 74HC08 CPU 클럭·2바이트 판정 AND 칩
 
-## U45 — 74HC32 Zero Tree finish
-1. 🟩 ALU6←U11-13
-2. 🟩 ALU7←U11-10
-3. ⬜ ZERO67→U45-10
-4. ⬜ ZERO01←U44-6
-5. ⬜ ZERO23←U44-8
-6. ⬜ ZERO03→U45-12
-7. ⬛ GND
-8. ⬜ ZERO47→U45-13
-9. ⬜ ZERO45←U44-11
-10. ⬜ ZERO67←U45-3
-11. ⬜ ZERO_ANY→U48-3
-12. ⬜ ZERO03←U45-6
-13. ⬜ ZERO47←U45-8
-14. 🟥 +5V
+역할: 원래 NE555 Clock을 CPU에 전달할지 결정하고, 명령어가 2바이트인지 판정한다.
 
-## U46 — 74HC04 IR/T-state/A Enable 반전
-1. 🟧 IR7←U15-19
-2. 🟧 IR7_N→U27-15
-3. 🟧 IR2←U15-6
-4. 🟧 IR2_N→U39-5
-5. 🟧 T1_N←U25-14
-6. 🟧 T1→U39-9,U30-10
-7. ⬛ GND
-8. 🟧 T3→U28-12
-9. 🟧 T3_N←U25-12
-10. 🟧 ACCESS_POS→U34-4
-11. 🟧 ACCESS_N←U33-8
-12. 🟧 A_EN→U30-5
-13. 🟧 A_EN_N←U30-3
-14. 🟥 +5V
+1. 1번 ← NE555 클럭 발생기 3번 핀 RAW_CLK
+2. 2번 ← RUN_EN 상태신호
+3. 3번 → CPU_CLK
+4. 4번 ← NOP_N
+5. 5번 ← OUT_N
+6. 6번 → BYTE2_A
+7. 7번 → GND
+8. 8번 → BYTE2
+9. 9번 ← 6번 BYTE2_A
+10. 10번 ← HLT_N
+11. 11번 → T3_BYTE2
+12. 12번 ← T3
+13. 13번 ← 8번 BYTE2
+14. 14번 → +5V
 
-## U47 — 74HC04 ALU/SUB/Z/Address/LCD 반전
-1. 🟧 ADD_SUB_N←U30-11
-2. 🟧 ALU_SEL→U23-1,U24-1
-3. 🟧 SUBCMP_N←U31-3
-4. 🟧 SUB_MODE→U12-2,U12-5,U12-10,U12-13,U13-2,U13-5,U13-10,U13-13,U10-7
-5. 🟧 Z_EN_N←U40-6
-6. 🟧 Z_EN→U31-10
-7. ⬛ GND
-8. 🟧 ADDR_SEL→U21-1,U22-1
-9. 🟧 ADDR_LOW←U32-8
-10. 🟧 PC_COUNT_N→U41-13,U43-2
-11. 🟧 PC_COUNT←U39-8
-12. 🟧 LCD_WRITE→U36-10
-13. 🟧 LCD_WRITE_N←U43-11
-14. 🟥 +5V
+### 가장 먼저 테스트
+1번과 2번을 수동 HIGH/LOW로 바꿔 3번이 AND 진리표대로 나오는지 확인한다.
 
-## U48 — 74HC04 OUT/ZERO/I-O/PS2/RAM BUS
-1. 🟧 OUT_EN_N←U36-3
-2. 🟧 OUT_EN→U36-5
-3. ⬜ ZERO_ANY←U45-11
-4. ⬜ ZERO→U52-2
-5. 🟨 ADDRESS A3←U21-12
-6. 🟨 A3_N→U50-6
-7. ⬛ GND
-8. ⬜ QC_N→U36-13
-9. ⬜ U64-12(QC)
-10. ⬜ LOWPAIR→U37-1
-11. ⬜ LOWPAIR_N←U63-9
-12. 🟧 U18_OE_N→U18-19
-13. 🟧 U18_EN_POS←U34-6
-14. 🟥 +5V
+---
 
-## U49 — 74HC04 STA/RAM Write/KEY ACK
-1. 🟧 STA_T5_N←U42-6
-2. 🟧 STA_T5→U37-13
-3. 🟧 RAM_WRITE_PULSE←U37-11
-4. 🟧 RAM_MWR_N→U5-17,U6-17,U7-17,U8-17,U9-17
-5. 🟧 KEY_ACK_COND_N←U43-8
-6. 🟧 KEY_ACK_COND→U35-5
-7. ⬛ GND
-8. 🟧 KEY_ACK_PULSE_N→U35-10
-9. 🟧 KEY_ACK_PULSE←U35-6
-10. 배선 없음
-11. ⬛ GND
-12. 배선 없음
-13. ⬛ GND
-14. 🟥 +5V
+# 6-4. 74HC08 MAR·A실행 제어 AND 칩
 
-## 초보자 테스트 순서
+1. 1번 ← T3_BYTE2
+2. 2번 ← LDI_N
+3. 3번 → MAR_EN
+4. 4번 ← CPU_CLK
+5. 5번 ← 3번 MAR_EN
+6. 6번 → 74HC273 메모리 주소 레지스터(MAR) 11번 Clock
+7. 7번 → GND
+8. 8번 → AEXEC_TMP
+9. 9번 ← LDA_N
+10. 10번 ← ADD_N
+11. 11번 → A_EXEC_N
+12. 12번 ← 8번 AEXEC_TMP
+13. 13번 ← SUB_N
+14. 14번 → +5V
 
-1. U28~U37 AND 게이트는 각 게이트를 수동 입력으로 먼저 확인한다.
-2. U39~U45 OR 게이트는 `00→0,01→1,10→1,11→1`을 확인한다.
-3. U46~U49 NOT은 `0→1,1→0`을 확인한다.
-4. Clock 출력(MAR_CLK/A_CLK/IR_CLK/Z_CLK/OUT_CLK)은 **LED로 pulse를 보고 중복 pulse가 없는지** 확인한다.
-5. ZERO는 ALU=0일 때만 U48-4가 HIGH여야 한다.
-6. U18/U19/U59/U61의 /OE를 동시에 관찰해 DATA BUS Driver가 둘 이상 동시에 활성되지 않는지 확인한다.
+---
 
-## 다음 파일
+# 6-5. 74HC08 A·IR 클럭 제어 AND 칩
+
+1. 1번 ← LDI_T3_N
+2. 2번 ← T5_AEXEC_N
+3. 3번 → A_EN_N
+4. 4번 ← CPU_CLK
+5. 5번 ← A_EN
+6. 6번 → 74HC273 A 레지스터 11번 Clock
+7. 7번 → GND
+8. 8번 → 74HC273 명령어 레지스터 11번 Clock
+9. 9번 ← CPU_CLK
+10. 10번 ← T1
+11. 11번 → ADD_SUB_N
+12. 12번 ← ADD_N
+13. 13번 ← SUB_N
+14. 14번 → +5V
+
+### 테스트
+CPU_CLK와 T1이 둘 다 HIGH일 때만 8번 IR Clock이 HIGH인지 확인한다.
+
+---
+
+# 6-6. 74HC08 SUB·CMP·Z·점프 제어 AND 칩
+
+1. 1번 ← SUB_N
+2. 2번 ← CMP_N
+3. 3번 → SUBCMP_N
+4. 4번 ← ADD_SUB_N
+5. 5번 ← CMP_N
+6. 6번 → ARITH_N
+7. 7번 → GND
+8. 8번 → Z_CLK
+9. 9번 ← CPU_CLK
+10. 10번 ← Z_EN
+11. 11번 → JUMP_PAIR1_N
+12. 12번 ← JMP_N
+13. 13번 ← RUN_N
+14. 14번 → +5V
+
+---
+
+# 6-7. 74HC08 점프·주소·읽기 제어 AND 칩
+
+1. 1번 ← JZ_TAKE_N
+2. 2번 ← JNZ_TAKE_N
+3. 3번 → JUMP_PAIR2_N
+4. 4번 ← JUMP_PAIR1_N
+5. 5번 ← JUMP_PAIR2_N
+6. 6번 → JUMP_ANY_N
+7. 7번 → GND
+8. 8번 → ADDR_LOW
+9. 9번 ← T4_N
+10. 10번 ← T5_N
+11. 11번 → READOP_N
+12. 12번 ← A_EXEC_N
+13. 13번 ← CMP_N
+14. 14번 → +5V
+
+---
+
+# 6-8. 74HC08 RAM 읽기 제어 AND 칩
+
+1. 1번 ← PROG_READ_N
+2. 2번 ← DATA_READ_N
+3. 3번 → CDP1824CE RAM #1~#5의 16번 MRD
+4. 4번 ← PROG_READ_N
+5. 5번 ← LDA_T5_N
+6. 6번 → RAM_BUS_READ_N
+7. 7번 → GND
+8. 8번 → ACCESS_N
+9. 9번 ← 6번 RAM_BUS_READ_N
+10. 10번 ← STA_T5_N
+11. 11번 → RAMVALID_TMP
+12. 12번 ← 74HC138 RAM 뱅크 디코더 10번 Y5
+13. 13번 ← RAM 뱅크 디코더 9번 Y6
+14. 14번 → +5V
+
+---
+
+# 6-9. 74HC08 RAM 버스·A/OUT/ALU 제어 AND 칩
+
+1. 1번 ← RAMVALID_TMP
+2. 2번 ← 74HC138 RAM 뱅크 디코더 7번 Y7
+3. 3번 → RAM_VALID
+4. 4번 ← ACCESS_POS
+5. 5번 ← RAM_VALID
+6. 6번 → U18_EN_POS라는 내부 제어신호
+7. 7번 → GND
+8. 8번 → AOUT_TMP1
+9. 9번 ← STA_N
+10. 10번 ← OUT_N
+11. 11번 → AOUTALU_N
+12. 12번 ← 8번 AOUT_TMP1
+13. 13번 ← ADD_SUB_N
+14. 14번 → +5V
+
+> `U18_EN_POS`는 이름에 번호가 들어간 예전 설계명 대신 **RAM 버스 드라이버 Enable 양논리 신호**라고 이해하면 된다. 배선할 때는 이 문서의 6번 출력과 뒤의 RAM BUS 인버터 13번 입력을 연결한다.
+
+---
+
+# 6-10. 74HC08 키보드·LCD·ACK 제어 AND 칩
+
+1. 1번 ← I/O 주소 디코더의 KEY_STATUS 선택 출력
+2. 2번 ← I/O 주소 디코더의 KEY_DATA 선택 출력
+3. 3번 → KEYSEL_N
+4. 4번 ← A_CLK
+5. 5번 ← KEY_ACK_COND
+6. 6번 → KEY_ACK_PULSE
+7. 7번 → GND
+8. 8번 → KEY_CLR_N
+9. 9번 ← RESET_N
+10. 10번 ← KEY_ACK_PULSE_N
+11. 11번 → LCDSEL_N
+12. 12번 ← I/O 주소 디코더 LCD_DATA 출력
+13. 13번 ← I/O 주소 디코더 LCD_COMMAND 출력
+14. 14번 → +5V
+
+---
+
+# 6-11. 74HC08 OUT·LCD·PS2 제어 AND 칩
+
+1. 1번 ← OUT_T5_N
+2. 2번 ← LCD_WRITE_N
+3. 3번 → OUT_EN_N
+4. 4번 ← CPU_CLK
+5. 5번 ← OUT_EN
+6. 6번 → 74HC273 출력 레지스터 11번 Clock
+7. 7번 → GND
+8. 8번 → LCD E 핀
+9. 9번 ← CPU_CLK
+10. 10번 ← LCD_WRITE
+11. 11번 → HIGHPAIR
+12. 12번 ← 74HC161 PS/2 비트 카운터 11번 QD
+13. 13번 ← QC_N
+14. 14번 → +5V
+
+---
+
+# 6-12. 74HC08 PS2·RAM 쓰기 펄스 제어 AND 칩
+
+1. 1번 ← LOWPAIR
+2. 2번 ← HIGHPAIR
+3. 3번 → COUNT11
+4. 4번 ← PS2_INV_CLK
+5. 5번 ← KEY_READY_N
+6. 6번 → PS2_SAMPLE_CLK
+7. 7번 → GND
+8. 8번 → FRAME_CLK
+9. 9번 ← PS2_POST_CLK
+10. 10번 ← COUNT11
+11. 11번 → RAM_WRITE_PULSE
+12. 12번 ← CPU_CLK
+13. 13번 ← STA_T5
+14. 14번 → +5V
+
+---
+
+# 6-13. 74HC08 예비 AND 칩
+
+현재 사용하지 않는다.
+
+- 입력핀 1,2,4,5,9,10,12,13 → GND
+- 7번 → GND
+- 14번 → +5V
+- 출력 3,6,8,11번 → 연결하지 않음
+
+---
+
+# 6-14. 74HC32 확장명령·PC카운트·LDI 제어 OR 칩
+
+1. 1번 ← EXT_VALID_N
+2. 2번 ← IR2
+3. 3번 → EXT_LO_EN_N
+4. 4번 ← EXT_VALID_N
+5. 5번 ← IR2_N
+6. 6번 → EXT_HI_EN_N
+7. 7번 → GND
+8. 8번 → PC_COUNT
+9. 9번 ← T1
+10. 10번 ← T3_BYTE2
+11. 11번 → LDI_T3_N
+12. 12번 ← T3_N
+13. 13번 ← LDI_N
+14. 14번 → +5V
+
+PC_COUNT 출력은 최종적으로 74HC161 PC 하위 4비트 카운터 10번 ENT로 간다.
+
+---
+
+# 6-15. 74HC32 A·Z·조건점프 제어 OR 칩
+
+1. 1번 ← T5_N
+2. 2번 ← A_EXEC_N
+3. 3번 → T5_AEXEC_N
+4. 4번 ← T5_N
+5. 5번 ← ARITH_N
+6. 6번 → Z_EN_N
+7. 7번 → GND
+8. 8번 → JZ_TAKE_N
+9. 9번 ← JZ_N
+10. 10번 ← Z_N
+11. 11번 → JNZ_TAKE_N
+12. 12번 ← JNZ_N
+13. 13번 ← Z
+14. 14번 → +5V
+
+---
+
+# 6-16. 74HC32 PC LOAD·RUN·HLT·Program Read 제어 OR 칩
+
+1. 1번 ← T5_N
+2. 2번 ← JUMP_ANY_N
+3. 3번 → 74HC161 PC 하위·상위 카운터의 9번 `/LOAD`
+4. 4번 ← T5_N
+5. 5번 ← RUN_N
+6. 6번 → RUN_T5_N
+7. 7번 → GND
+8. 8번 → HLT_T5_N
+9. 9번 ← T5_N
+10. 10번 ← HLT_N
+11. 11번 → PROG_READ_N
+12. 12번 ← MONITOR_MODE
+13. 13번 ← PC_COUNT_N
+14. 14번 → +5V
+
+---
+
+# 6-17. 74HC32 Read·Write·BUS 제어 OR 칩
+
+1. 1번 ← T5_N
+2. 2번 ← READOP_N
+3. 3번 → DATA_READ_N
+4. 4번 ← STA_N
+5. 5번 ← T5_N
+6. 6번 → STA_T5_N
+7. 7번 → GND
+8. 8번 → LDA_T5_N
+9. 9번 ← LDA_N
+10. 10번 ← T5_N
+11. 11번 → 74HC245 A/ALU 데이터 버스 드라이버 19번 `/OE`
+12. 12번 ← T5_N
+13. 13번 ← AOUTALU_N
+14. 14번 → +5V
+
+---
+
+# 6-18. 74HC32 Boot·Keyboard·LCD BUS 제어 OR 칩
+
+1. 1번 ← MONITOR_N
+2. 2번 ← PC_COUNT_N
+3. 3번 → 74HC245 Boot ROM 데이터 버스 드라이버 19번 `/OE`
+4. 4번 ← LDA_T5_N
+5. 5번 ← KEYSEL_N
+6. 6번 → 74HC245 키보드 데이터 버스 드라이버 19번 `/OE`
+7. 7번 → GND
+8. 8번 → KEY_ACK_COND_N
+9. 9번 ← LDA_T5_N
+10. 10번 ← KEY_DATA 주소 선택 출력
+11. 11번 → LCD_WRITE_N
+12. 12번 ← STA_T5_N
+13. 13번 ← LCDSEL_N
+14. 14번 → +5V
+
+---
+
+# 6-19. 74HC32 OUT·Zero Tree 앞단 OR 칩
+
+이 칩부터는 ALU 결과가 0인지 검사하는 Zero Detector도 같이 만든다.
+
+1. 1번 ← OUT_N
+2. 2번 ← T5_N
+3. 3번 → OUT_T5_N
+4. 4번 ← ALU0
+5. 5번 ← ALU1
+6. 6번 → ZERO01
+7. 7번 → GND
+8. 8번 → ZERO23
+9. 9번 ← ALU2
+10. 10번 ← ALU3
+11. 11번 → ZERO45
+12. 12번 ← ALU4
+13. 13번 ← ALU5
+14. 14번 → +5V
+
+---
+
+# 6-20. 74HC32 Zero Tree 뒷단 OR 칩
+
+1. 1번 ← ALU6
+2. 2번 ← ALU7
+3. 3번 → ZERO67
+4. 4번 ← ZERO01
+5. 5번 ← ZERO23
+6. 6번 → ZERO03
+7. 7번 → GND
+8. 8번 → ZERO47
+9. 9번 ← ZERO45
+10. 10번 ← ZERO67
+11. 11번 → ZERO_ANY
+12. 12번 ← ZERO03
+13. 13번 ← ZERO47
+14. 14번 → +5V
+
+ZERO_ANY가 LOW일 때만 8비트 ALU 결과가 전부 0이다. 다음 인버터에서 이를 ZERO=HIGH로 바꾼다.
+
+---
+
+# 6-21. 74HC04 IR·T-state·A Enable 인버터
+
+1. 1번 ← IR7
+2. 2번 → IR7_N
+3. 3번 ← IR2
+4. 4번 → IR2_N
+5. 5번 ← T1_N
+6. 6번 → T1
+7. 7번 → GND
+8. 8번 → T3
+9. 9번 ← T3_N
+10. 10번 → ACCESS_POS
+11. 11번 ← ACCESS_N
+12. 12번 → A_EN
+13. 13번 ← A_EN_N
+14. 14번 → +5V
+
+---
+
+# 6-22. 74HC04 ALU·SUB·Z·Address·LCD 인버터
+
+1. 1번 ← ADD_SUB_N
+2. 2번 → ALU_SEL
+3. 3번 ← SUBCMP_N
+4. 4번 → SUB_MODE
+5. 5번 ← Z_EN_N
+6. 6번 → Z_EN
+7. 7번 → GND
+8. 8번 → ADDR_SEL
+9. 9번 ← ADDR_LOW
+10. 10번 → PC_COUNT_N
+11. 11번 ← PC_COUNT
+12. 12번 → LCD_WRITE
+13. 13번 ← LCD_WRITE_N
+14. 14번 → +5V
+
+ALU_SEL은 74HC157 A/ALU 선택 MUX 두 칩의 1번 Select로 간다.
+SUB_MODE는 74HC86 두 칩의 XOR 제어와 74HC283 ALU 하위 가산기 7번 CIN으로 간다.
+ADDR_SEL은 74HC157 주소 선택 MUX 두 칩의 1번 Select로 간다.
+
+---
+
+# 6-23. 74HC04 OUT·ZERO·I/O·PS2·RAM BUS 인버터
+
+1. 1번 ← OUT_EN_N
+2. 2번 → OUT_EN
+3. 3번 ← ZERO_ANY
+4. 4번 → ZERO
+5. 5번 ← ADDRESS A3
+6. 6번 → A3_N
+7. 7번 → GND
+8. 8번 → QC_N
+9. 9번 ← 74HC161 PS/2 비트 카운터 12번 QC
+10. 10번 → LOWPAIR
+11. 11번 ← LOWPAIR_N
+12. 12번 → 74HC245 RAM 데이터 버스 드라이버 19번 `/OE`
+13. 13번 ← RAM 버스 드라이버 Enable 양논리 신호
+14. 14번 → +5V
+
+---
+
+# 6-24. 74HC04 STA·RAM Write·KEY ACK 인버터
+
+1. 1번 ← STA_T5_N
+2. 2번 → STA_T5
+3. 3번 ← RAM_WRITE_PULSE
+4. 4번 → CDP1824CE RAM #1~#5의 17번 MWR
+5. 5번 ← KEY_ACK_COND_N
+6. 6번 → KEY_ACK_COND
+7. 7번 → GND
+8. 8번 → KEY_ACK_PULSE_N
+9. 9번 ← KEY_ACK_PULSE
+10. 10번 → 미사용 출력
+11. 11번 입력 → GND
+12. 12번 → 미사용 출력
+13. 13번 입력 → GND
+14. 14번 → +5V
+
+---
+
+# 6-25. 제어회로 테스트 방법
+
+이 단계에서는 프로그램 전체를 바로 실행하지 않는다.
+
+각 게이트를 하나씩 확인한다.
+
+## AND 게이트
+입력 00,01,10,11 네 경우를 넣고 출력이 0001인지 확인한다.
+
+## OR 게이트
+입력 00,01,10,11에서 출력이 0111인지 확인한다.
+
+## NOT 게이트
+입력 LOW→출력 HIGH, 입력 HIGH→출력 LOW인지 확인한다.
+
+## 그 다음 실제 신호 확인
+
+1. 마이크로스텝을 T1로 만들면 IR Clock 조건이 생기는지 확인
+2. LDA + T5에서 A Clock 조건이 생기는지 확인
+3. ADD/SUB에서 ALU Select가 계산 결과 쪽으로 가는지 확인
+4. STA + T5에서 RAM Write pulse가 생기는지 확인
+5. HLT에서 RUN_EN이 꺼질 조건이 만들어지는지 확인
+
+---
+
+# 완료 체크
+
+- [ ] 모든 74HC08 게이트 개별 테스트 정상
+- [ ] 모든 74HC32 게이트 개별 테스트 정상
+- [ ] 모든 74HC04 인버터 정상
+- [ ] A Clock 정상
+- [ ] IR Clock 정상
+- [ ] MAR Clock 정상
+- [ ] Program Counter Count/Load 제어 정상
+- [ ] RAM Read/Write 제어 정상
+- [ ] Zero Detector 출력 정상
 
 [07_Flag_BootROM.md](./07_Flag_BootROM.md)
