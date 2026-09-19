@@ -107,8 +107,17 @@
   // World-space radius for resolving a click to a breadboard hole. Must exceed the
   // worst-case distance from any point to its nearest hole (PITCH/sqrt(2) ~= 7.07)
   // so every click inside a board's hole field resolves to *some* hole, with no dead
-  // zones. Deliberately zoom-independent: hole spacing is fixed in world units.
+  // zones and no fiddly precision required. Deliberately zoom-independent: hole
+  // spacing is fixed in world units, and a real breadboard hole is a genuinely easy
+  // physical target — clicking it here should be too.
   function holeThreshold() { return G().PITCH * 0.8; }
+
+  // Used on a fresh click to decide "start a wire from this hole" vs "grab the board
+  // to drag it". Deliberately the SAME generous radius as holeThreshold — the margins
+  // around the hole field (board border + name label, >= PITCH*1.6 from any hole) are
+  // naturally clear of holes, so board-dragging still works from there without making
+  // wire-starting fiddly across the (much more frequently used) hole field itself.
+  function preciseHoleRadius() { return holeThreshold(); }
 
   function resolveConnectionPoint(hit, world) {
     if (hit.kind === 'pin') return { type: 'componentPin', componentId: hit.componentId, pin: hit.pin };
@@ -429,15 +438,24 @@
       selectAndMaybeDrag('components', hit.id, e, world);
       return;
     }
-    if (hit.kind === 'board') {
-      selectAndMaybeDrag('boards', hit.id, e, world);
-      return;
+
+    // A click landing on a board could mean "grab the board to move it" or "start a
+    // wire from the hole under the cursor" — both are valid clicks anywhere on the
+    // board's body. Disambiguate by precision: only a click close to an actual hole
+    // center counts as a hole click; otherwise it's a board grab. This must run BEFORE
+    // the generic 'board' handling below, or a board under the cursor always wins and
+    // holes become unreachable for wiring.
+    if (hit.kind === 'board' || hit.kind === 'empty') {
+      const preciseHole = G().nearestHoleAmongBoards(S().data.boards, world.x, world.y, preciseHoleRadius());
+      if (preciseHole) {
+        startWireDraft({ type: 'breadboardHole', boardId: preciseHole.boardId, row: preciseHole.row, column: preciseHole.col });
+        renderWirePreview(world);
+        return;
+      }
     }
 
-    const hole = G().nearestHoleAmongBoards(S().data.boards, world.x, world.y, holeThreshold());
-    if (hole) {
-      startWireDraft({ type: 'breadboardHole', boardId: hole.boardId, row: hole.row, column: hole.col });
-      renderWirePreview(world);
+    if (hit.kind === 'board') {
+      selectAndMaybeDrag('boards', hit.id, e, world);
       return;
     }
 
