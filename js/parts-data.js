@@ -56,8 +56,8 @@
   ALL.push(inline('SW_SLIDE', 'input', 'Slide Switch', ['1', '2', '3'], 'slide-switch', ['slide', '슬라이드']));
   ALL.push(inline('SW_TOGGLE', 'input', 'Toggle Switch', ['1', '2', '3'], 'toggle-switch', ['toggle', '토글']));
   ALL.push(inline('SW_DIP', 'input', 'DIP Switch', ['1', '2', '3', '4', '5', '6', '7', '8'], 'dip-switch', ['dip switch', '딥스위치']));
-  ALL.push(inline('POT_10K', 'input', '가변저항 10kΩ', ['1', '2', '3'], 'potentiometer', ['potentiometer', '가변저항', 'pot'], 1));
-  ALL.push(inline('POT_CUSTOM', 'input', '가변저항 (사용자 지정)', ['1', '2', '3'], 'potentiometer', ['potentiometer custom', '가변저항 사용자'], 1));
+  ALL.push(Object.assign(inline('POT_10K', 'input', '가변저항 10kΩ', ['1', '2', '3'], 'potentiometer', ['potentiometer', '가변저항', 'pot'], 1), { defaultProps: { value: '10kΩ' } }));
+  ALL.push(Object.assign(inline('POT_CUSTOM', 'input', '가변저항 (사용자 지정)', ['1', '2', '3'], 'potentiometer', ['potentiometer custom', '가변저항 사용자'], 1), { defaultProps: { value: '10kΩ' }, editableValue: true }));
 
   // ---------------- Power ----------------
   ALL.push(inline('PWR_5V', 'power', '+5V Terminal', ['+5V'], 'power-terminal', ['5v', '전원']));
