@@ -480,9 +480,30 @@
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
     menu.hidden = false;
+    // Clamp into the viewport after layout so a menu opened near the right/bottom
+    // edge doesn't render partly off-screen (position:fixed, so it never clips
+    // against #workspace-container, but it can still overshoot the window itself).
+    const menuRect = menu.getBoundingClientRect();
+    const overflowX = menuRect.right - window.innerWidth;
+    const overflowY = menuRect.bottom - window.innerHeight;
+    if (overflowX > 0) menu.style.left = Math.max(0, x - overflowX) + 'px';
+    if (overflowY > 0) menu.style.top = Math.max(0, y - overflowY) + 'px';
     setTimeout(() => window.addEventListener('pointerdown', hideContextMenuOnce, { once: true }), 0);
   }
-  function hideContextMenuOnce() { hideContextMenu(); }
+  function hideContextMenuOnce(e) {
+    const menu = document.getElementById('context-menu');
+    // A pointerdown ON a menu item must NOT hide the menu here: that would set
+    // display:none before the item's own 'click' handler fires (click follows
+    // pointerdown/up), and browsers drop a click whose target got hidden mid-gesture
+    // — silently swallowing every context-menu action. Let the item's own handler
+    // (which already calls hideContextMenu()) close it instead, and re-arm so a
+    // later actual outside-click still dismisses the menu.
+    if (!menu.hidden && menu.contains(e.target)) {
+      window.addEventListener('pointerdown', hideContextMenuOnce, { once: true });
+      return;
+    }
+    hideContextMenu();
+  }
   function hideContextMenu() { document.getElementById('context-menu').hidden = true; }
 
   function componentContextItems(id) {
@@ -510,6 +531,18 @@
       { label: w && w.locked ? '잠금 해제' : '잠금', action: () => S().updateWire(id, { locked: !(w && w.locked) }, '잠금') },
       { label: '삭제', danger: true, action: () => S().deleteByIds('wire', [id]) }
     ];
+  }
+  function bendContextItems(wireId, index) {
+    return [
+      { label: '이 꺾임점 삭제', danger: true, action: () => deleteBendPoint(wireId, index) }
+    ];
+  }
+  function deleteBendPoint(wireId, index) {
+    const w = S().getWire(wireId);
+    if (!w) return;
+    const points = (w.points || []).slice();
+    points.splice(index, 1);
+    S().updateWire(wireId, { points }, '꺾임점 삭제');
   }
   function boardContextItems(id) {
     const b = S().getBoard(id);
@@ -669,6 +702,6 @@
     init, renderPartsList, renderPropertiesPanel, renderComponentList, renderWireList,
     showContextMenu, hideContextMenu, showHoverTip, hideHoverTip, toast,
     setStatusMode, setStatusCoords, setAutosaveStatus, focusNameField, setActiveTab,
-    componentContextItems, wireContextItems, boardContextItems, labelContextItems, canvasContextItems
+    componentContextItems, wireContextItems, bendContextItems, boardContextItems, labelContextItems, canvasContextItems
   };
 })(window);

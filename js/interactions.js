@@ -15,7 +15,8 @@
   let dragStartWorld = null, dragSnapshot = null;
   let boxStartClient = null, boxStartWorld = null;
   let wireDraft = null; // { fromRef, points: [world points] }
-  let bendDrag = null;  // { wireId, index }
+  let bendDrag = null;  // { wireId, index, inserting? }
+  let pendingWireBend = null; // { wireId, startWorld } — armed on wire pointerdown, promoted to bendDrag once dragged
   let pendingLabelKind = null;
   let hoveredPinKey = null;
 
@@ -178,7 +179,7 @@
     const from = R().resolveEndpoint(wireDraft.fromRef);
     if (!from) return;
     const pts = [{ x: from.x, y: from.y }, ...wireDraft.points, currentWorld];
-    const d = R().pathD(pts);
+    const d = R().buildWireD(pts, S().data.settings.wireRouting);
     const layer = document.getElementById('wire-preview-layer');
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', d);
@@ -260,7 +261,7 @@
       const touches = ref => ref.type === 'componentPin' && movedComp.has(ref.componentId);
       if (!touches(wire.from) && !touches(wire.to)) return;
       const applied = applyDeltaToWire(wire, dx, dy, movedComp);
-      const d = R().pathD(applied);
+      const d = R().buildWireD(applied, S().data.settings.wireRouting);
       const g = document.querySelector('[data-wire-id="' + cssEscape(wire.id) + '"]');
       if (!g) return;
       g.querySelectorAll('path').forEach(p => p.setAttribute('d', d));
@@ -308,6 +309,13 @@
     mode = 'idle';
     dragSnapshot = null;
     R().renderAll();
+  }
+
+  function cancelBendDrag() {
+    mode = 'idle';
+    bendDrag = null;
+    pendingBendPoints = null;
+    R().renderAll(); // discards the live (uncommitted) DOM path edits, restoring the saved shape
   }
 
   // ---------------- box select ----------------
@@ -427,7 +435,14 @@
       return;
     }
     if (hit.kind === 'wire') {
+      const already = S().isSelected('wires', hit.id);
       if (e.shiftKey) S().toggleSelect('wires', hit.id); else S().selectOnly('wires', hit.id);
+      // Dragging the wire's body (not an existing bend handle) reshapes it: a real
+      // drag inserts a new bend point at the grab location and follows the cursor.
+      // A plain click (no movement) just selects, same as before.
+      if (!(e.shiftKey && !already) && !S().isLocked('wire', hit.id)) {
+        pendingWireBend = { wireId: hit.id, startWorld: world };
+      }
       return;
     }
     if (hit.kind === 'label') {
@@ -472,16 +487,77 @@
     startDragSelected(world);
   }
 
+  // Used only for wire BEND points (mid-wire kinks), never for wire endpoints or
+  // component placement. A bend has no electrical meaning — it's just a routing
+  // waypoint floating above the board — so it snaps to the plain layout grid for
+  // tidiness only, and deliberately never locks onto a breadboard hole the way a
+  // real connection point does.
   function snapPointMaybe(world, altHeld) {
     if (!S().data.settings.snapToGrid || altHeld) return world;
-    const hole = G().nearestHoleAmongBoards(S().data.boards, world.x, world.y, G().PITCH * 0.9);
-    if (hole) return { x: hole.x, y: hole.y };
     return G().snapToGlobalGrid(world.x, world.y);
+  }
+
+  // Which segment of a wire's resolved path is closest to a point — used both to pick
+  // where a double-click inserts a bend point and where a click-and-drag on the wire's
+  // body should insert one. Index is into wire.points (the manual bends), not the
+  // full resolved path (which also has the fixed from/to endpoints at its ends).
+  function findWireInsertIndex(wire, worldPt) {
+    const pts = R().wirePathPoints(wire);
+    let bestIdx = 0, bestDist = Infinity;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const d = G().distToSegment(worldPt.x, worldPt.y, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
+  // Applies one live pointer position to the wire currently being bend-dragged,
+  // updating the on-screen path immediately without touching State/undo — used for
+  // both moving an existing bend point and, when bendDrag.inserting is set, for
+  // pulling a brand-new point out of the wire's body as the cursor moves.
+  function applyBendDragMove(world, altHeld) {
+    const wire = S().getWire(bendDrag.wireId);
+    if (!wire) return;
+    const pt = snapPointMaybe(world, altHeld);
+    const pts = (wire.points || []).slice();
+    if (bendDrag.inserting) pts.splice(bendDrag.index, 0, pt);
+    else pts[bendDrag.index] = pt;
+    const g = document.querySelector('[data-wire-id="' + cssEscape(wire.id) + '"]');
+    const from = R().resolveEndpoint(wire.from), to = R().resolveEndpoint(wire.to);
+    if (g && from && to) {
+      const d = R().buildWireD([from, ...pts, to], S().data.settings.wireRouting);
+      g.querySelectorAll('path').forEach(p => p.setAttribute('d', d));
+    }
+    if (!bendDrag.inserting) {
+      const handle = document.querySelector('.wire-bend[data-wire-id="' + cssEscape(wire.id) + '"][data-bend-index="' + bendDrag.index + '"]');
+      if (handle) { handle.setAttribute('cx', pt.x); handle.setAttribute('cy', pt.y); }
+    }
+    pendingBendPoints = pts;
+  }
+
+  // A wire-body pointerdown doesn't yet know if it's a click (just select) or a drag
+  // (reshape) — this promotes it to an actual bend-drag once the cursor has moved
+  // far enough to no longer look like a plain click.
+  function promoteWireBendDrag(currentWorld, altHeld) {
+    const info = pendingWireBend;
+    pendingWireBend = null;
+    const wire = S().getWire(info.wireId);
+    if (!wire) return;
+    const insertIndex = findWireInsertIndex(wire, info.startWorld);
+    bendDrag = { wireId: wire.id, index: insertIndex, inserting: true };
+    mode = 'draggingBend';
+    applyBendDragMove(currentWorld, altHeld);
   }
 
   function onPointerMove(e) {
     const world = clientToWorld(e.clientX, e.clientY);
     UI().setStatusCoords(world);
+
+    if (pendingWireBend && mode === 'idle') {
+      const dist = Math.hypot(world.x - pendingWireBend.startWorld.x, world.y - pendingWireBend.startWorld.y);
+      if (dist > 3 / S().data.view.zoom) promoteWireBendDrag(world, e.altKey);
+      return;
+    }
 
     if (mode === 'panning') {
       const dx = e.clientX - panStartClient.x, dy = e.clientY - panStartClient.y;
@@ -498,23 +574,7 @@
       lastDragDelta = { dx, dy };
       return;
     }
-    if (mode === 'draggingBend') {
-      const wire = S().getWire(bendDrag.wireId);
-      if (!wire) return;
-      const pt = snapPointMaybe(world, e.altKey);
-      const pts = (wire.points || []).slice();
-      pts[bendDrag.index] = pt;
-      const g = document.querySelector('[data-wire-id="' + cssEscape(wire.id) + '"]');
-      const from = R().resolveEndpoint(wire.from), to = R().resolveEndpoint(wire.to);
-      if (g && from && to) {
-        const d = R().pathD([from, ...pts, to]);
-        g.querySelectorAll('path').forEach(p => p.setAttribute('d', d));
-      }
-      const handle = document.querySelector('.wire-bend[data-wire-id="' + cssEscape(wire.id) + '"][data-bend-index="' + bendDrag.index + '"]');
-      if (handle) { handle.setAttribute('cx', pt.x); handle.setAttribute('cy', pt.y); }
-      pendingBendPoints = pts;
-      return;
-    }
+    if (mode === 'draggingBend') { applyBendDragMove(world, e.altKey); return; }
     if (mode === 'wiring') { renderWirePreview(snapPointMaybe(world, e.altKey)); return; }
 
     // idle hover: pin tooltip + connection highlight, wire hover
@@ -557,6 +617,7 @@
   }
 
   function onPointerUp(e) {
+    if (pendingWireBend) pendingWireBend = null; // never dragged past the threshold: plain click, already selected on pointerdown
     if (mode === 'panning') { mode = 'idle'; svgRoot.classList.remove('panning'); return; }
     if (mode === 'boxSelecting') { finalizeBoxSelect(clientToWorld(e.clientX, e.clientY), e.shiftKey); R().renderAll(); return; }
     if (mode === 'dragging') {
@@ -583,12 +644,7 @@
       const wire = S().getWire(hit.id);
       if (!wire) return;
       const world = clientToWorld(e.clientX, e.clientY);
-      const pts = R().wirePathPoints(wire);
-      let bestIdx = 0, bestDist = Infinity;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const d = G().distToSegment(world.x, world.y, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y);
-        if (d < bestDist) { bestDist = d; bestIdx = i; }
-      }
+      const bestIdx = findWireInsertIndex(wire, world);
       const newPoints = (wire.points || []).slice();
       newPoints.splice(bestIdx, 0, world);
       S().updateWire(wire.id, { points: newPoints }, '꺾임점 추가');
@@ -617,7 +673,10 @@
     const hit = hitTest(e.target);
     const world = clientToWorld(e.clientX, e.clientY);
     let items = [];
-    if (hit.kind === 'component') {
+    if (hit.kind === 'bend') {
+      S().selectOnly('wires', hit.wireId);
+      items = UI().bendContextItems(hit.wireId, hit.index);
+    } else if (hit.kind === 'component') {
       if (!S().isSelected('components', hit.id)) S().selectOnly('components', hit.id);
       items = UI().componentContextItems(hit.id);
     } else if (hit.kind === 'wire') {
@@ -727,6 +786,7 @@
     if (e.key === 'Escape') {
       if (wireDraft) cancelWireDraft();
       else if (mode === 'dragging') cancelDrag();
+      else if (mode === 'draggingBend') cancelBendDrag();
       else if (pendingLabelKind) { pendingLabelKind = null; svgRoot.classList.remove('wiring'); UI().setStatusMode('선택'); }
       else S().clearSelection();
       return;

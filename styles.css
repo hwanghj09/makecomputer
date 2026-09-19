@@ -195,7 +195,12 @@ input { font-family: inherit; }
 .chk, .radio { display: flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text); }
 
 .context-menu {
-  position: absolute;
+  /* fixed (not absolute): showContextMenu positions it with viewport-relative
+     clientX/clientY. #workspace-container (its DOM parent) is `position:relative`
+     with `overflow:hidden`, so `absolute` here would both offset the menu by the
+     container's own distance from the viewport edge (sidebar/toolbar width) instead
+     of landing at the actual click point, and risk being clipped near edges. */
+  position: fixed;
   min-width: 160px;
   background: var(--bg-dark-2);
   border: 1px solid var(--border);

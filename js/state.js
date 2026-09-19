@@ -133,6 +133,12 @@
       return this.selection.boards.size || this.selection.components.size || this.selection.wires.size || this.selection.labels.size;
     },
     selectOnly(kind, id) {
+      // No-op if this exact single item is already the whole selection: avoids a
+      // pointless re-render on every repeat click (e.g. clicking an already-selected
+      // wire), which matters beyond performance — replacing the DOM node under the
+      // cursor between the two clicks of a double-click breaks the browser's native
+      // dblclick detection, silently killing double-click-to-add-a-bend-point.
+      if (kind && id && this.selectionCount() === 1 && this.selection[kind].has(id)) return;
       this.clearSelection();
       if (kind && id) this.selection[kind].add(id);
       this.notifySelection();

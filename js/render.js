@@ -142,6 +142,34 @@
     return 'M ' + points.map(p => p.x.toFixed(2) + ' ' + p.y.toFixed(2)).join(' L ');
   }
 
+  // Tinkercad-style wire path: each segment is a gentle quadratic-bezier arc instead of
+  // a flat line, so wires visually lift off the board plane rather than lying flat over
+  // (and hiding) the holes/silkscreen underneath. The control point is offset from the
+  // segment midpoint along whichever perpendicular direction points "up" on screen
+  // (smaller Y), so wires consistently bow upward the way a real slack wire would.
+  function curvedPathD(points) {
+    if (!points || points.length < 2) return pathD(points);
+    let d = 'M ' + points[0].x.toFixed(2) + ' ' + points[0].y.toFixed(2);
+    for (let i = 1; i < points.length; i++) {
+      const p0 = points[i - 1], p1 = points[i];
+      const dx = p1.x - p0.x, dy = p1.y - p0.y;
+      const len = Math.hypot(dx, dy) || 1;
+      let nx = -dy / len, ny = dx / len;
+      if (ny > 0 || (ny === 0 && nx > 0)) { nx = -nx; ny = -ny; } // pick the "upward" perpendicular
+      const lift = Math.max(3, Math.min(len * 0.22, 26));
+      const cx = (p0.x + p1.x) / 2 + nx * lift;
+      const cy = (p0.y + p1.y) / 2 + ny * lift;
+      d += ' Q ' + cx.toFixed(2) + ' ' + cy.toFixed(2) + ' ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2);
+    }
+    return d;
+  }
+
+  // Picks the right 'd' string for a wire's routing mode: 'ortho' stays sharp/straight
+  // (it's explicitly the right-angle mode), 'direct' gets the curved Tinkercad look.
+  function buildWireD(points, routing) {
+    return routing === 'ortho' ? pathD(points) : curvedPathD(points);
+  }
+
   function wireStrokeWidth(wire) {
     const t = wire.thickness || S().data.settings.wireThickness || 'normal';
     return t === 'thin' ? 1.4 : t === 'thick' ? 3.4 : 2.2;
@@ -357,7 +385,7 @@
       if (colorFilter && !colorFilter.has((wire.color || '').toLowerCase())) return;
       const pts = wirePathPoints(wire);
       if (!pts) return;
-      const d = pathD(pts);
+      const d = buildWireD(pts, S().data.settings.wireRouting);
       const selected = S().isSelected('wires', wire.id);
       const width = wireStrokeWidth(wire);
       const g = el('g', { 'data-wire-id': wire.id });
@@ -494,7 +522,7 @@
     init, renderAll, updateTransform, renderMinimap,
     componentPinLocalOffsets, componentPinWorldPositions, componentPinWorldByIndex,
     componentLocalBBox, componentLocalCenter, componentWorldBBox, boardWorldBBox, labelWorldBBox,
-    resolveEndpoint, wirePathPoints, pathD, wireStrokeWidth,
+    resolveEndpoint, wirePathPoints, pathD, curvedPathD, buildWireD, wireStrokeWidth,
     setHoverWire, setHighlightPin
   };
 })(window);
