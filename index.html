@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAKECOMPUTER Breadboard Digitalizer</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <header id="toolbar">
+    <div class="toolbar-group toolbar-brand">
+      <span class="brand">MAKECOMPUTER</span>
+      <span class="brand-sub">Breadboard Digitalizer</span>
+    </div>
+    <div class="toolbar-group">
+      <button id="btn-new" title="새로 만들기">새로 만들기</button>
+      <button id="btn-open" title="열기 (JSON)">열기</button>
+      <input type="file" id="file-input" accept="application/json,.json" hidden>
+      <button id="btn-save" title="저장 (Ctrl+S)">저장</button>
+      <button id="btn-save-as" title="다른 이름으로 저장">다른 이름으로 저장</button>
+    </div>
+    <div class="toolbar-group">
+      <button id="btn-undo" title="실행 취소 (Ctrl+Z)">↶ 실행취소</button>
+      <button id="btn-redo" title="다시 실행 (Ctrl+Y)">↷ 다시실행</button>
+    </div>
+    <div class="toolbar-group">
+      <button id="btn-zoom-out" title="축소">－</button>
+      <span id="zoom-display">100%</span>
+      <button id="btn-zoom-in" title="확대">＋</button>
+      <button id="btn-zoom-100" title="100% (1)">100%</button>
+      <button id="btn-zoom-fit" title="화면맞춤 (F)">화면맞춤</button>
+    </div>
+    <div class="toolbar-group">
+      <button id="btn-add-board" title="브레드보드 추가">+ 브레드보드</button>
+      <button id="btn-add-text" title="텍스트 라벨 추가">+ 텍스트</button>
+      <button id="btn-add-rect" title="사각형 추가">+ 사각형</button>
+      <button id="btn-add-arrow" title="화살표 추가">+ 화살표</button>
+    </div>
+    <div class="toolbar-group">
+      <button id="btn-export-png" title="PNG 내보내기">PNG 내보내기</button>
+    </div>
+    <div class="toolbar-group toolbar-right">
+      <button id="btn-settings" title="설정">설정</button>
+    </div>
+  </header>
+
+  <div id="main">
+
+    <aside id="sidebar-left">
+      <div class="panel-header">부품 목록</div>
+      <div class="search-box">
+        <input id="part-search" type="text" placeholder="부품 검색... (예: 161, mux)">
+      </div>
+      <div id="parts-list" class="parts-list"></div>
+    </aside>
+
+    <div id="workspace-container">
+      <svg id="workspace" xmlns="http://www.w3.org/2000/svg">
+        <defs id="workspace-defs"></defs>
+        <rect id="workspace-bg" x="-100000" y="-100000" width="200000" height="200000" fill="var(--ws-bg)"></rect>
+        <g id="world">
+          <g id="grid-layer"></g>
+          <g id="boards-layer"></g>
+          <g id="components-layer"></g>
+          <g id="wires-layer"></g>
+          <g id="labels-layer"></g>
+          <g id="wire-preview-layer"></g>
+          <g id="selection-layer"></g>
+          <g id="handles-layer"></g>
+        </g>
+      </svg>
+
+      <div id="marquee" class="marquee" hidden></div>
+
+      <div id="minimap-container">
+        <svg id="minimap"></svg>
+      </div>
+
+      <div id="context-menu" class="context-menu" hidden></div>
+
+      <div id="hover-tip" class="hover-tip" hidden></div>
+
+      <div id="view-controls">
+        <label class="chk"><input type="checkbox" id="chk-show-grid" checked> 격자</label>
+        <label class="chk"><input type="checkbox" id="chk-snap" checked> 격자 맞춤</label>
+      </div>
+    </div>
+
+    <aside id="sidebar-right">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="properties">속성</button>
+        <button class="tab-btn" data-tab="components">부품</button>
+        <button class="tab-btn" data-tab="wires">선</button>
+        <button class="tab-btn" data-tab="view">보기</button>
+      </div>
+
+      <div id="panel-properties" class="panel tab-panel active"></div>
+
+      <div id="panel-components" class="panel tab-panel">
+        <div class="panel-toolbar">
+          <input type="text" id="component-filter" placeholder="이름/타입 필터">
+        </div>
+        <div id="component-list" class="entity-list"></div>
+      </div>
+
+      <div id="panel-wires" class="panel tab-panel">
+        <div class="panel-toolbar">
+          <button id="btn-wires-show-all">모두 표시</button>
+          <button id="btn-wires-hide-all">모두 숨김</button>
+        </div>
+        <div id="wire-color-filter" class="color-filter"></div>
+        <div id="wire-list" class="entity-list"></div>
+      </div>
+
+      <div id="panel-view" class="panel tab-panel">
+        <div class="prop-section">
+          <div class="prop-title">핀 번호 표시</div>
+          <label class="radio"><input type="radio" name="pinnum" value="always"> 항상</label>
+          <label class="radio"><input type="radio" name="pinnum" value="zoom" checked> 확대했을 때만</label>
+          <label class="radio"><input type="radio" name="pinnum" value="hidden"> 숨김</label>
+        </div>
+        <div class="prop-section">
+          <div class="prop-title">핀 이름 표시</div>
+          <label class="radio"><input type="radio" name="pinname" value="always"> 항상</label>
+          <label class="radio"><input type="radio" name="pinname" value="zoom" checked> 확대했을 때만</label>
+          <label class="radio"><input type="radio" name="pinname" value="hidden"> 숨김</label>
+        </div>
+        <div class="prop-section">
+          <div class="prop-title">점퍼선 경로</div>
+          <label class="radio"><input type="radio" name="routing" value="direct" checked> 직접 경로</label>
+          <label class="radio"><input type="radio" name="routing" value="ortho"> 직각 자동 경로</label>
+        </div>
+        <div class="prop-section">
+          <div class="prop-title">점퍼선 두께</div>
+          <label class="radio"><input type="radio" name="thickness" value="thin"> 얇게</label>
+          <label class="radio"><input type="radio" name="thickness" value="normal" checked> 보통</label>
+          <label class="radio"><input type="radio" name="thickness" value="thick"> 굵게</label>
+        </div>
+        <div class="prop-section">
+          <div class="prop-title">브레드보드 이동 시</div>
+          <label class="chk"><input type="checkbox" id="chk-move-children" checked> 꽂힌 부품도 함께 이동</label>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <footer id="statusbar">
+    <span id="status-zoom">Zoom 100%</span>
+    <span class="sep">|</span>
+    <span id="status-selection">선택 없음</span>
+    <span class="sep">|</span>
+    <span id="status-coords">X: 0000 Y: 0000</span>
+    <span class="sep">|</span>
+    <span id="status-mode">모드: 선택</span>
+    <span class="sep">|</span>
+    <span id="status-autosave">자동 저장됨</span>
+  </footer>
+
+</div>
+
+<div id="toast-container"></div>
+
+<script src="js/geometry.js"></script>
+<script src="js/parts-data.js"></script>
+<script src="js/state.js"></script>
+<script src="js/render.js"></script>
+<script src="js/interactions.js"></script>
+<script src="js/io.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
