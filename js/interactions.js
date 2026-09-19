@@ -612,6 +612,8 @@
 
   function onContextMenu(e) {
     e.preventDefault();
+    if (wireDraft) { cancelWireDraft(); return; }
+    if (pendingLabelKind) { pendingLabelKind = null; svgRoot.classList.remove('wiring'); UI().setStatusMode('선택'); return; }
     const hit = hitTest(e.target);
     const world = clientToWorld(e.clientX, e.clientY);
     let items = [];

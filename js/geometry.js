@@ -102,17 +102,19 @@
   }
 
   // --- Generic DIP pin layout -------------------------------------------------
-  // Standard breadboard DIP convention: pin 1 at top-left (row 1, leftmost),
-  // pins 1..N/2 run left->right along row 1; pins N/2+1..N run right->left along
-  // row 2, so pin N sits directly opposite pin 1 and pin N/2+1 opposite pin N/2.
+  // Standard DIP convention (matches every real datasheet): viewed from above with
+  // the pin-1/notch mark at the top-left corner, pin 1 is the pin directly BELOW the
+  // notch (bottom-left) and numbering runs counter-clockwise from there — right along
+  // the bottom row (1..N/2), then back right-to-left along the top row (N/2+1..N),
+  // ending at pin N in the top-left corner right next to the notch.
   function dipPinLocalOffset(pinIndex1based, totalPins, rowGapUnits) {
     const half = totalPins / 2;
     const gapY = (rowGapUnits == null ? 1 : rowGapUnits) * PITCH;
     if (pinIndex1based <= half) {
-      return { x: (pinIndex1based - 1) * PITCH, y: 0, row: 0 };
+      return { x: (pinIndex1based - 1) * PITCH, y: gapY, row: 1 };
     }
     const colFromLeft = totalPins - pinIndex1based;
-    return { x: colFromLeft * PITCH, y: gapY, row: 1 };
+    return { x: colFromLeft * PITCH, y: 0, row: 0 };
   }
 
   function dipBodySize(totalPins, rowGapUnits) {
